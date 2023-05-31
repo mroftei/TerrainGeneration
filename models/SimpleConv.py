@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 from .ModelBase import ModelBase
 
+# N. Soltani, K. Sankhe, S. Ioannidis, D. Jaisinghani, and K. Chowdhury, 
+# “Spectrum Awareness at the Edge: Modulation Classification using Smartphones,” 
+# 2019 IEEE International Symposium on Dynamic Spectrum Access Networks, DySPAN 2019, Nov. 2019, doi: 10.1109/DYSPAN.2019.8935775.
 class SimpleConv(ModelBase):
     def __init__(
         self,

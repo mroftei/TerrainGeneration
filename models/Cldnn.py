@@ -22,7 +22,6 @@ class Cldnn(ModelBase):
         # Build model
         self.conv1 = nn.Sequential()
         self.conv2 = nn.Sequential()
-        self.conv2 = nn.Sequential()
         self.mlp = nn.Sequential()
 
         # Batch x IQ x input_samples
