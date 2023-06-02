@@ -60,8 +60,15 @@ K. Tekbıyık, A. R. Ekti, A. Görçin, G. K. Kurt, and C. Keçeci, “Robust an
 
 ## Models
 
-### SimpleConv
-Simple convolutional model with 5 blocks of 2 Convolutions with Max Pooling after each block. Classifier is a 3-layer MLP.
+### VTCNN2
+Very simple CNN used in the first RadioML paper. 2 Convolutions follwed by 2 Linear layers.
+
+T. J. O'Shea, J. Corgan, and T. C. Clancy, “Convolutional radio modulation
+recognition networks,” in International Conference on Engineering Applications
+of Neural Networks, pp. 213-226, Springer,2016.
+
+### ConvBlocks
+Convolutional model with 5 blocks of 2 Convolutions with Max Pooling after each block. Classifier is a 3-layer MLP.
 
 N. Soltani, K. Sankhe, S. Ioannidis, D. Jaisinghani, and K. Chowdhury, “Spectrum Awareness at the Edge: Modulation Classification using Smartphones,” 2019 IEEE International Symposium on Dynamic Spectrum Access Networks, DySPAN 2019, Nov. 2019, doi: 10.1109/DYSPAN.2019.8935775.
 
@@ -73,3 +80,4 @@ N. E. West and T. O’Shea, “Deep architectures for modulation recognition,”
 https://github.com/brysef/rfml/blob/master/rfml/nn/model/cldnn.py
 
 ### ResNet
+

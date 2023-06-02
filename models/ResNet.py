@@ -45,12 +45,14 @@ class ResNet(ModelBase):
     def __init__(
         self,
         classes: List[str],
+        input_samples: int,
         learning_rate: float = 0.0001,
     ):
         super().__init__(classes=classes)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
+        self.example_input_array = torch.zeros((1,input_samples), dtype=torch.cfloat)
 
         # Build model
         self.model = nn.Sequential()

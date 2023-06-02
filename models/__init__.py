@@ -1,7 +1,8 @@
 from .ModelBase import ModelBase
-from .SimpleConv import SimpleConv
+from .CNNBlocks import CNNBlocks
 from .ResNet import ResNet
-from .RnnNet import RnnNet
-from .Cldnn import Cldnn
+from .CNN1 import VTCNN2
+from .Cldnn2 import Cldnn
+from .DeepFIR import DeepFIR
 
-__all__ = ['ModelBase', 'SimpleConv', 'ResNet', 'RnnNet', 'Cldnn']
+__all__ = ['ModelBase', 'CNNBlocks', 'ResNet', 'Cldnn2', 'CNN1', 'DeepFIR']
