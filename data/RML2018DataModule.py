@@ -49,13 +49,13 @@ class RML2018DataModule(pl.LightningDataModule):
         # Convery one-hot label to index
         y = torch.argmax(y, axis=1)
 
-        print("Normalizing...")
+        # print("Normalizing...")
         # Per-frame normalize to -1.0:1.0
         # TODO: try 0:1 scaling
-        new_min, new_max = -1.0, 1.0
-        x_max = x.abs().amax(axis=(1,2), keepdim=True) # farthest value from 0 in each frame
-        scale = ((new_max - new_min) / (x_max*2))
-        x *= scale
+        # new_min, new_max = -1.0, 1.0
+        # x_max = x.abs().amax(axis=(1,2), keepdim=True) # farthest value from 0 in each frame
+        # scale = ((new_max - new_min) / (x_max*2))
+        # x *= scale
 
         # scale randomly by 0.75-1.0
         # rng = np.random.default_rng(1024)

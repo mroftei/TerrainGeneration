@@ -2,6 +2,7 @@ import torch
 from pytorch_lightning import Trainer
 import pytorch_lightning as pl
 from data.RML2018DataModule import RML2018DataModule
+from data.CSPB2018DataModule import CSPB2018DataModule
 from argparse import ArgumentParser
 import os
 from models import *
@@ -50,7 +51,8 @@ if __name__ == "__main__":
 
     pl.seed_everything(args.seed)
 
-    dm = RML2018DataModule('/work/ds2/data/k.witham/RML2018.01/GOLD_XYZ_OSC.0001_1024.hdf5', args.bs, use_hard = True)
+    # dm = RML2018DataModule('/work/ds2/data/k.witham/RML2018.01/GOLD_XYZ_OSC.0001_1024.hdf5', args.bs, use_hard = True)
+    dm = CSPB2018DataModule("/work/ds2/data/k.witham/CSPB.ML.2018", args.bs, download=False)
 
     # args.use_1d=True
     match args.model:
@@ -58,10 +60,8 @@ if __name__ == "__main__":
             model = CNNBlocks(classes=dm.classes, input_samples=dm.frame_size, use_1d=args.use_1d)
         case 'ResNet':
             model = ResNet(classes=dm.classes, input_samples=dm.frame_size, use_1d=args.use_1d)
-        case 'VTCNN2':
-            model = VTCNN2(classes=dm.classes, input_samples=dm.frame_size, use_1d=args.use_1d)
         case 'Cldnn':
-            model = Cldnn(classes=dm.classes, input_samples=dm.frame_size, use_1d=args.use_1d)
+            model = Cldnn2(classes=dm.classes, input_samples=dm.frame_size, use_1d=args.use_1d)
         case 'DeepFIR':
             model = DeepFIR(classes=dm.classes, input_samples=dm.frame_size)
     
