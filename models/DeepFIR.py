@@ -18,7 +18,7 @@ class DeepFIR(ModelBase):
         
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         self.cconv = nn.Conv1d(input_channels, 128, 7, padding=3, dtype=torch.cfloat, bias=False)
 

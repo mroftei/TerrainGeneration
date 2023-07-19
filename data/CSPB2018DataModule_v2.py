@@ -64,7 +64,7 @@ class CSPB2018DataModule_v2(pl.LightningDataModule):
         y = np.repeat(y, reshape_factor)
         snr = np.repeat(snr, reshape_factor, 0)
 
-        ds_full = TensorDataset(torch.from_numpy(data), torch.from_numpy(y), torch.from_numpy(snr))
+        ds_full = TensorDataset(torch.from_numpy(data), torch.from_numpy(y).to(torch.long), torch.from_numpy(snr))
 
         self.ds_train, self.ds_val, self.ds_test = random_split(ds_full, [0.6, 0.2, 0.2], generator = torch.Generator().manual_seed(42))
 
