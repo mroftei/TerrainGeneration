@@ -11,6 +11,7 @@ class DeepFIR(ModelBase):
         self,
         classes: List[str],
         input_samples: int,
+        input_channels: int = 1,
         learning_rate: float = 0.0001,
     ):
         super().__init__(classes=classes)
@@ -19,7 +20,7 @@ class DeepFIR(ModelBase):
         self.lr = learning_rate
         self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
 
-        self.cconv = nn.Conv1d(1, 128, 7, padding=3, dtype=torch.cfloat, bias=False)
+        self.cconv = nn.Conv1d(input_channels, 128, 7, padding=3, dtype=torch.cfloat, bias=False)
 
         # Build model
         self.model = nn.Sequential()
