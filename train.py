@@ -54,7 +54,7 @@ if __name__ == "__main__":
 
     # dm = RML2018DataModule('/work/ds2/data/k.witham/RML2018.01/GOLD_XYZ_OSC.0001_1024.hdf5', args.bs, use_hard = True)
     # dm = CSPB2018DataModule("/work/ds2/data/k.witham/CSPB.ML.2018", args.bs, download=False)
-    dm = CSPB2018DataModule_v2("/work/ds2/data/k.witham/CSPB ML Noise Free/cspb_no_noise.hdf5", args.bs, n_rx=6)
+    dm = CSPB2018DataModule_v2("/work/ds2/data/k.witham/CSPB ML Noise Free/cspb_no_noise_6chan.hdf5", args.bs, n_rx=6)
 
     # args.use_1d=True
     match args.model:
