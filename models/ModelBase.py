@@ -35,6 +35,7 @@ class ModelBase(pl.LightningModule):
         output = self.forward(data)
         loss = self.loss(output, target)
         if self.global_step!= 0: self.logger.log_metrics({'train/loss': loss, 'epoch': self.current_epoch}, self.global_step)
+        self.log("loss", loss, prog_bar=True, logger=False)
         return loss
 
     def validation_step(self, batch, batch_nb):
@@ -51,6 +52,7 @@ class ModelBase(pl.LightningModule):
         metrics_dict = self.val_metrics.compute()
         self.val_metrics.reset()
         if self.global_step!= 0: self.logger.log_metrics(metrics_dict, self.global_step)
+        self.log("val/F1", metrics_dict['val/F1'], prog_bar=True, logger=False)
         
         # Confusion Matrix
         mpl.use("Agg")
@@ -120,23 +122,24 @@ class ModelBase(pl.LightningModule):
         plt.tight_layout()
         self.logger.experiment.add_figure("test/cm", fig, global_step=self.global_step)
         
-        # test_snr = self.trainer.datamodule.ds_test.dataset.tensors[2][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
-        # test_true = self.trainer.datamodule.ds_test.dataset.tensors[1][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
+        test_snr = self.trainer.datamodule.ds_test.dataset.tensors[2][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
+        test_true = self.trainer.datamodule.ds_test.dataset.tensors[1][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
 
-        # SNRs = torch.unique(test_snr).numpy(force=True)
-        # F1s = []
-        # for snr in SNRs:
-        #     ind = test_snr == snr
-        #     F1s.append(torchmetrics.functional.classification.multiclass_f1_score(self.outputs_list[ind].cpu(), test_true[ind], len(self.classes)).numpy(force=True))
-        # self.outputs_list = self.outputs_list.zero_()
+        test_snr = torch.round(test_snr)
+        SNRs = torch.unique(test_snr).numpy(force=True)
+        F1s = []
+        for snr in SNRs:
+            ind = test_snr == snr
+            F1s.append(torchmetrics.functional.classification.multiclass_f1_score(self.outputs_list[ind].cpu(), test_true[ind], len(self.classes)).numpy(force=True))
+        self.outputs_list = self.outputs_list.zero_()
 
-        # fig = plt.figure(figsize=(8, 4))
-        # ax = fig.subplots()
-        # plt.plot(SNRs, F1s, linestyle='-', marker='o')
-        # ax.set_title('SNR F1')
-        # plt.xlabel('SNR')
-        # plt.ylabel('F1')
-        # plt.ylim(0,1)
-        # plt.grid(True)
-        # plt.tight_layout()
-        # self.logger.experiment.add_figure("test/snr_f1", fig, global_step=self.global_step)
+        fig = plt.figure(figsize=(8, 4))
+        ax = fig.subplots()
+        plt.plot(SNRs, F1s, linestyle='-', marker='o')
+        ax.set_title('SNR F1')
+        plt.xlabel('SNR')
+        plt.ylabel('F1')
+        plt.ylim(0,1)
+        plt.grid(True)
+        plt.tight_layout()
+        self.logger.experiment.add_figure("test/snr_f1", fig, global_step=self.global_step)
