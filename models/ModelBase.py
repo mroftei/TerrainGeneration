@@ -6,7 +6,7 @@ import matplotlib as mpl
 import seaborn as sns
 
 class ModelBase(pl.LightningModule):
-    def __init__(self, classes):
+    def __init__(self, classes, **kwargs):
         super().__init__()
         self.save_hyperparameters()
 
@@ -24,6 +24,7 @@ class ModelBase(pl.LightningModule):
     def on_train_start(self):
         if self.global_step==0: 
             init_logs = {k: 0 for k in self.val_metrics.keys()}
+            init_logs.update({k: 0 for k in self.test_metrics.keys()})
             self.logger.log_hyperparams(self.hparams, init_logs)
 
     def on_test_start(self):

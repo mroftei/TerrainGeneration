@@ -1,7 +1,20 @@
 from .ModelBase import ModelBase
+# CNN
 from .CNNBlocks import CNNBlocks
-from .ResNet import ResNet
-from .Cldnn2 import Cldnn2
 from .DeepFIR import DeepFIR
+from .ResNet import ResNet
+from .ResNet1 import ResNet1
+from .CNN1 import CNN1
+from .CNN2 import CNN2
+from .DenseNet import DenseNet
+from .ICAMCNET import ICAMCNET
+from .MCNET import MCNET
+from .MCLDNN import MCLDNN
+# RNN
+from .LSTM2 import LSTM2
+from .GRU2 import GRU2
+# Hybrid
+from .CLDNN import CLDNN
+from .CLDNN2 import CLDNN2
 
-__all__ = ['ModelBase', 'CNNBlocks', 'ResNet', 'Cldnn2', 'CNN1', 'DeepFIR']
+__all__ = ['ModelBase', 'CNNBlocks', 'ResNet', 'CLDNN', 'CLDNN2', 'CNN1', 'CNN2', 'ResNet1', 'DenseNet', 'MCNET', 'DeepFIR', 'MCLDNN', 'LSTM2', 'GRU2', 'ICAMCNET']

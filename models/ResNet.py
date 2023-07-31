@@ -1,8 +1,6 @@
 from typing import List
-import torchmetrics
 import torch
 import torch.nn as nn
-import math
 from .ModelBase import ModelBase
 
 class residual_unit(nn.Module):
@@ -42,47 +40,52 @@ class residual_stack(nn.Module):
         
 
 class ResNet(ModelBase):
+    """
+
+    References
+        T. J. O'Shea, T. Roy, and T. C. Clancy, 
+        “Over the Air Deep Learning Based Radio Signal Classification,” 
+        IEEE Journal on Selected Topics in Signal Processing, vol. 12, no. 1, pp. 168-179, Dec. 2017, 
+        doi: 10.1109/jstsp.2018.2797022.
+
+    """
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         # Build model
-        self.model = nn.Sequential()
-
-        self.model.append(residual_stack(2))
-        self.model.append(residual_stack(32))
-        self.model.append(residual_stack(32))
-        self.model.append(residual_stack(32))
-        self.model.append(residual_stack(32))
-        self.model.append(residual_stack(32))
-        
-        frame_size_2 = 1024
-        for i in range(6):
-            frame_size_2 = math.floor((frame_size_2-2)/2+1)
-        frame_size_2 = frame_size_2 * 32
-            
-        self.model.append(nn.Flatten())
-        self.model.append(nn.Linear(frame_size_2, 128))
-        self.model.append(nn.SELU(inplace=True))
-        # self.model.append(nn.ReLU(inplace=True))
-        self.model.append(nn.AlphaDropout(0.3))
-        self.model.append(nn.Linear(128, 128))
-        self.model.append(nn.SELU(inplace=True))
-        # self.model.append(nn.ReLU(inplace=True))
-        self.model.append(nn.AlphaDropout(0.3))
-        self.model.append(nn.Linear(128, len(classes)))
-        
+        self.model = nn.Sequential(
+            residual_stack(2*input_channels),
+            residual_stack(32),
+            residual_stack(32),
+            residual_stack(32),
+            residual_stack(32),
+            residual_stack(32),
+            nn.Flatten(),
+            nn.LazyLinear(128),
+            nn.SELU(inplace=True),
+            nn.AlphaDropout(0.3),
+            nn.Linear(128, 128),
+            nn.SELU(inplace=True),
+            nn.AlphaDropout(0.3),
+            nn.Linear(128, len(classes)),
+        )
         
     def forward(self, x):
+        x = torch.view_as_real(x)
+        x = torch.transpose(x, -1, -2)
+        x = torch.flatten(x, -3, -2)
         return self.model(x)
         
     def configure_optimizers(self):
-        return torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=0.00001)

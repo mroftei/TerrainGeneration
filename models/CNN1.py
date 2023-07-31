@@ -37,59 +37,39 @@ class CNN1(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
-        use_1d: bool = False,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.use_1d = use_1d
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         self.model = nn.Sequential()
 
         # Batch x 1-channel x IQ x input_samples
-        if use_1d:
-            self.model.append(nn.Conv1d(
-                in_channels=2,
-                out_channels=256,
-                kernel_size=7,
-                padding=3,
-                bias=False,
-            ))
-            self.model.append(nn.ReLU())
-            self.model.append(nn.BatchNorm1d(256))
-            self.model.append(nn.Conv1d(
-                in_channels=256,
-                out_channels=80,
-                kernel_size=7,
-                padding=3,
-                bias=True,
-            ))
-            self.model.append(nn.ReLU())
-            self.model.append(nn.BatchNorm1d(80))
-        else:
-            self.model.append(nn.Conv2d(
-                in_channels=1,
-                out_channels=256,
-                kernel_size=(7,1),
-                padding=(3,0),
-                bias=False,
-            ))
-            self.model.append(nn.ReLU())
-            self.model.append(nn.BatchNorm2d(256))
-            self.model.append(nn.Conv2d(
-                in_channels=256,
-                out_channels=80,
-                kernel_size=(7,2),
-                padding=(3,0),
-                bias=True,
-            ))
-            self.model.append(nn.ReLU())
-            self.model.append(nn.BatchNorm2d(80))
+        self.model.append(nn.Conv1d(
+            in_channels=2*input_channels,
+            out_channels=256,
+            kernel_size=7,
+            padding=3,
+            bias=False,
+        ))
+        self.model.append(nn.ReLU())
+        self.model.append(nn.BatchNorm1d(256))
+        self.model.append(nn.Conv1d(
+            in_channels=256,
+            out_channels=80,
+            kernel_size=7,
+            padding=3,
+            bias=True,
+        ))
+        self.model.append(nn.ReLU())
+        self.model.append(nn.BatchNorm1d(80))
 
         # Flatten the input layer down to 1-d
         self.model.append(nn.Flatten())
@@ -103,10 +83,9 @@ class CNN1(ModelBase):
 
     def forward(self, x: torch.Tensor):
         x = torch.view_as_real(x)
-        if self.use_1d:
-            x = x.transpose(-2,-1).flatten(1,2).contiguous()
+        x = x.transpose(-2,-1).flatten(1,2).contiguous()
         y = self.model(x)
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

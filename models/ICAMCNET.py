@@ -5,15 +5,15 @@ from .ModelBase import ModelBase
 
 class AddGaussianNoise(nn.Module):
     def __init__(self, mean=0.0, std=1.0):
-        self.gen = torch.Generator().manual_seed(42)
+        super().__init__()
         self.std = std
         self.mean = mean
         
     def forward(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        return tensor + torch.randn(tensor.size(), device=tensor.get_device()) * self.std + self.mean
     
 
-class CNN2(ModelBase):
+class ICAMCNET(ModelBase):
     """
 
     References
@@ -25,61 +25,63 @@ class CNN2(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
-
-        self.model = nn.Sequential()
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         # Batch x 1-channel x input_samples x IQ 
-        self.model.append(nn.Conv2d(
-            in_channels=1,
-            out_channels=64,
-            kernel_size=(8,1),
-            padding='same',
-        ))
-        self.model.append(nn.ReLU())
-        self.model.append(nn.MaxPool2d((2,1)))
-        self.model.append(nn.Conv2d(
-            in_channels=64,
-            out_channels=64,
-            kernel_size=(4,1),
-            padding='same',
-        ))
-        self.model.append(nn.ReLU())
-        self.model.append(nn.MaxPool2d((2,1)))
-        self.model.append(nn.Conv2d(
-            in_channels=64,
-            out_channels=128,
-            kernel_size=(8,1),
-            padding='same',
-        ))
-        self.model.append(nn.ReLU())
-        self.model.append(nn.Conv2d(
-            in_channels=64,
-            out_channels=128,
-            kernel_size=(1,1),
-            padding='same',
-        ))
-        self.model.append(nn.ReLU())
-        self.model.append(nn.MaxPool2d((2,1)))
-        self.model.append(nn.Dropout2d(0.4))
+        self.model = nn.Sequential(
+            nn.Conv2d(
+                in_channels=input_channels,
+                out_channels=64,
+                kernel_size=(7,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d((2,2)),
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=64,
+                kernel_size=(3,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.Conv2d(
+                in_channels=64,
+                out_channels=128,
+                kernel_size=(7,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.MaxPool2d((1 ,1)),
+            nn.Dropout2d(0.4),
+            nn.Conv2d(
+                in_channels=128,
+                out_channels=128,
+                kernel_size=(7,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.Dropout2d(0.4),
 
-        # Flatten the input layer down to 1-d
-        self.model.append(nn.Flatten())
+            # Flatten the input layer down to 1-d
+            nn.Flatten(),
 
-        # Batch x Features
-        self.model.append(nn.LazyLinear(128))
-        self.model.append(nn.ReLU())
-        self.model.append(nn.Dropout2d(0.4))
-        self.model.append(AddGaussianNoise())
-        self.model.append(nn.Linear(128, len(classes)))
+            # Batch x Features
+            nn.LazyLinear(128),
+            nn.ReLU(),
+            nn.Dropout1d(0.4),
+            AddGaussianNoise(),
+            nn.Linear(128, len(classes)),
+        )
 
     def forward(self, x: torch.Tensor):
         x = torch.view_as_real(x)
@@ -87,4 +89,4 @@ class CNN2(ModelBase):
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

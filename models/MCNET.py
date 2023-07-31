@@ -4,11 +4,11 @@ import torch.nn as nn
 from .ModelBase import ModelBase
 
 class PreBlock(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, input_channels):
         super().__init__()
 
         self.conv1 = nn.Conv2d(
-            in_channels=1,
+            in_channels=input_channels,
             out_channels=64,
             kernel_size=(7,3),
             stride=(2,1),
@@ -187,17 +187,19 @@ class MCNET(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
-        self.preblock = PreBlock()
+        self.preblock = PreBlock(input_channels)
 
         self.skip1conv = nn.Conv2d(64, 128, kernel_size=(1,1), stride=(2,1), padding=(0,0), bias=True)
         self.skip1pool = nn.MaxPool2d((3,1), stride=(2,1), padding=(1,0))
@@ -255,4 +257,4 @@ class MCNET(ModelBase):
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

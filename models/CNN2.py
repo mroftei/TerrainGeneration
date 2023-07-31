@@ -17,21 +17,23 @@ class CNN2(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         self.model = nn.Sequential()
 
         # Batch x 1-channel x input_samples x IQ 
         self.model.append(nn.Conv2d(
-            in_channels=1,
+            in_channels=input_channels,
             out_channels=256,
             kernel_size=(7,2),
             padding=(3,1),
@@ -88,4 +90,4 @@ class CNN2(ModelBase):
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

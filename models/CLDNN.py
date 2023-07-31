@@ -16,22 +16,24 @@ class CLDNN(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         self.conv = nn.Sequential()
         self.mlp = nn.Sequential()
 
         # Batch x 1-channel x input_samples x IQ 
         self.conv.append(nn.Conv2d(
-            in_channels=1,
+            in_channels=input_channels,
             out_channels=256,
             kernel_size=(3,1),
             padding='same',
@@ -74,7 +76,7 @@ class CLDNN(ModelBase):
         # Batch x Features
         self.mlp.append(nn.LazyLinear(128))
         self.mlp.append(nn.ReLU())
-        self.mlp.append(nn.Dropout2d(0.6))
+        self.mlp.append(nn.Dropout1d(0.6))
         self.mlp.append(nn.Linear(128, len(classes)))
 
     def forward(self, x: torch.Tensor):
@@ -96,4 +98,4 @@ class CLDNN(ModelBase):
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

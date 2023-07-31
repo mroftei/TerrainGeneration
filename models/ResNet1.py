@@ -16,21 +16,23 @@ class ResNet1(ModelBase):
 
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
-        self.example_input_array = torch.zeros((1,1,input_samples), dtype=torch.cfloat)
+        self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         self.model = nn.Sequential()
 
         # Batch x 1-channel x input_samples x IQ 
         self.conv1 = nn.Conv2d(
-            in_channels=1,
+            in_channels=input_channels,
             out_channels=256,
             kernel_size=(3,1),
             padding='same',
@@ -71,13 +73,13 @@ class ResNet1(ModelBase):
 
     def forward(self, x: torch.Tensor):
         x = torch.view_as_real(x)
-        y = self.conv1(x)
-        y = self.relu1(y)
+        y1 = self.conv1(x)
+        y = self.relu1(y1)
         y = self.conv2(y)
-        y = y + x
+        y += y1
         y = self.model(y)
 
         return y
     
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=0.00001)

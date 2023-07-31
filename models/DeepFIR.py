@@ -9,12 +9,13 @@ from .ModelBase import ModelBase
 class DeepFIR(ModelBase):
     def __init__(
         self,
-        classes: List[str],
         input_samples: int,
-        input_channels: int = 1,
-        learning_rate: float = 0.0001,
+        input_channels: int,
+        classes: List[str],
+        learning_rate: float = 0.001,
+        **kwargs
     ):
-        super().__init__(classes=classes)
+        super().__init__(classes=classes, *kwargs)
         
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
@@ -53,4 +54,4 @@ class DeepFIR(ModelBase):
         return self.model(y)
         
     def configure_optimizers(self):
-        return torch.optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=0.00001)
+        return torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=0.00001)
