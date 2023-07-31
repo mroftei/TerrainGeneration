@@ -59,14 +59,23 @@ K. Tekbıyık, A. R. Ekti, A. Görçin, G. K. Kurt, and C. Keçeci, “Robust an
 
 
 ## Models
-
-### VTCNN2
-Very simple CNN used in the first RadioML paper. 2 Convolutions follwed by 2 Linear layers.
-
-T. J. O'Shea, J. Corgan, and T. C. Clancy, “Convolutional radio modulation
-recognition networks,” in International Conference on Engineering Applications
-of Neural Networks, pp. 213-226, Springer,2016.
-
+Model Performance on CSPB2018 v2 test dataset 
+| Dataset   | 1 chan | 6 chan |
+|-----------|--------|--------|
+| CNN1      |  | 0.7366 |
+| CNN2      |  |  |
+| MCNET     |  |  |
+| IC-AMCNET |  |  |
+| ResNet    |  |  |
+| DenseNet  |  |  |
+| GRU       |  | 0.7337 |
+| LSTM      | 0.6744 | 0.7566 |
+| DAE       |  |  |
+| MCLDNN    |  | 0.7331 |
+| CLDNN     |  |  |
+| CLDNN2    |  |  |
+| CGDNet    |  |  |
+| PET-CGDNN |  |  |
 ### ConvBlocks
 Convolutional model with 5 blocks of 2 Convolutions with Max Pooling after each block. Classifier is a 3-layer MLP.
 
@@ -79,5 +88,59 @@ N. E. West and T. O’Shea, “Deep architectures for modulation recognition,”
 
 https://github.com/brysef/rfml/blob/master/rfml/nn/model/cldnn.py
 
-### ResNet
+### CLDNN2
+Convolutional Long Deep Neural Network (CNN + GRU + MLP)
 
+N. E. West and T. O'Shea, “Deep architectures for modulation recognition,” in IEEE International Symposium on Dynamic Spectrum Access Networks (DySPAN), pp. 1-6, IEEE, 2017.
+
+### CNN1
+Variation of VTCNN2
+
+T. J. O'Shea, J. Corgan, and T. C. Clancy, “Convolutional radio modulation recognition networks,” in International Conference on Engineering Applications of Neural Networks, pp. 213-226, Springer,2016.
+
+S. C. Hauser, W. C. Headley, and A. J.  Michaels, “Signal detection effects ondeep neural networks utilizing raw iq for modulation classification,” in Military Communications Conference, pp. 121-127, IEEE, 2017.
+
+### CNN2
+Convs with 2-layer MLP
+
+K. Tekbiyik, A. R. Ekti, A. Görçin, G. K. Kurt, and C. Keçeci, “Robust and Fast Automatic Modulation Classification with CNN under Multipath Fading Channels,” in 2020 IEEE 91st Vehicular Technology Conference (VTC2020-Spring), May 2020, pp. 1-6. doi: 10.1109/VTC2020-Spring48590.2020.9128408.
+
+### DenseNet
+Small convs with skips
+
+X. Liu, D. Yang, and A. E. Gamal, “Deep neural network architectures for modulation classification,” in 2017 51st Asilomar Conference on Signals, Systems, and Computers, Oct. 2017, pp. 915-919. doi: 10.1109/ACSSC.2017.8335483.
+
+### MCNET
+Multiple Conv blocks with different kernel sizes in parallel.
+
+T. Huynh-The, C.-H. Hua, Q.-V. Pham, and D.-S. Kim, “MCNet: An Efficient CNN Architecture for Robust Automatic Modulation Classification,” IEEE Communications Letters, vol. 24, no. 4, pp. 811-815, Apr. 2020, doi: 10.1109/LCOMM.2020.2968030.
+
+### ResNet
+5 residual convolutional blocks
+
+T. J. O'Shea, T. Roy, and T. C. Clancy, “Over the Air Deep Learning Based Radio Signal Classification,” IEEE Journal on Selected Topics in Signal Processing, vol. 12, no. 1, pp. 168-179, Dec. 2017, doi: 10.1109/jstsp.2018.2797022.
+
+### ResNet1
+2 conv layers with a skip to more convs and MLP
+
+X. Liu, D. Yang, and A. E. Gamal, “Deep neural network architectures for modulation classification,” in 2017 51st Asilomar Conference on Signals, Systems, and Computers, Oct. 2017, pp. 915-919. doi: 10.1109/ACSSC.2017.8335483.
+
+### IC-AMCNET
+Multi-layer conv feature extractor. Add Gaussian noise before last linear layer in MLP.
+
+A. P. Hermawan, R. R. Ginanjar, D.-S. Kim, and J.-M. Lee, “CNN-Based Automatic Modulation Classification for Beyond 5G Communications,” IEEE Communications Letters, vol. 24, no. 5, pp. 1038-1041, May 2020, doi: 10.1109/LCOMM.2020.2970922.
+
+### LSTM2
+2-layer LSTM followed by MLP.
+
+S. Rajendran, W. Meert, D. Giustiniano, V. Lenders, and S. Pollin, “Deep Learning Models for Wireless Signal Classification With Distributed Low-Cost Spectrum Sensors,” IEEE Transactions on Cognitive Communications and Networking, vol. 4, no. 3, pp. 433-445, Sep. 2018, doi: 10.1109/TCCN.2018.2835460.
+
+### GRU2
+2-layer GRU followed by MLP.
+
+D. Hong, Z. Zhang, and X. Xu, “Automatic modulation classification using recurrent neural networks,” in 2017 3rd IEEE International Conference on Computer and Communications (ICCC), Dec. 2017, pp. 695--700. doi: 10.1109/CompComm.2017.8322633.
+
+### MCLDNN
+Convolutions on both IQ and I and Q seperately. Concat together and then put through 2-layer LSTM followed by MLP.
+
+J. Xu, C. Luo, G. Parr, and Y. Luo, “A Spatiotemporal Multi-Channel Learning Framework for Automatic Modulation Recognition,” IEEE Wireless Communications Letters, vol. 9, no. 10, pp. 1629-1632, Oct. 2020, doi: 10.1109/LWC.2020.2999453.
