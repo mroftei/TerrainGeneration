@@ -42,7 +42,7 @@ class CLDNN2(ModelBase):
         learning_rate: float = 0.001,
         **kwargs
     ):
-        super().__init__(classes=classes, *kwargs)
+        super().__init__(classes=classes, **kwargs)
         
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
@@ -50,21 +50,22 @@ class CLDNN2(ModelBase):
         self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
         # Build model
-        self.conv1 = nn.Sequential()
-        self.conv2 = nn.Sequential()
-        self.mlp = nn.Sequential()
-
         # Batch x IQ x input_samples
-        self.conv1.append(nn.Conv1d(in_channels=2*input_channels, out_channels=50, kernel_size=7, padding=3, bias=False))
-        self.conv1.append(nn.ReLU(inplace=True))
-        self.conv1.append(nn.BatchNorm1d(50))
 
-        self.conv2.append(nn.Conv1d(in_channels=50, out_channels=50, kernel_size=7, padding=3, bias=True))
-        self.conv2.append(nn.ReLU(inplace=True))
-        self.conv2.append(nn.BatchNorm1d(50))
-        self.conv2.append(nn.Conv1d(in_channels=50, out_channels=50, kernel_size=7, padding=3, bias=True))
-        self.conv2.append(nn.ReLU(inplace=True))
-        self.conv2.append(nn.BatchNorm1d(50))  
+        self.conv1 = nn.Sequential(
+            nn.Conv1d(in_channels=2*input_channels, out_channels=50, kernel_size=7, padding=3, bias=False),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(50),
+        )
+
+        self.conv2 = nn.Sequential(
+            nn.Conv1d(in_channels=50, out_channels=50, kernel_size=7, padding=3, bias=True),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(50),
+            nn.Conv1d(in_channels=50, out_channels=50, kernel_size=7, padding=3, bias=True),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm1d(50),
+        )
 
         self.gru = nn.GRU(
             input_size=100,  # 100 channels after concatenation (50+50) * IQ (2)
@@ -74,20 +75,19 @@ class CLDNN2(ModelBase):
             bidirectional=False,
         )
 
-        # Flatten everything outside of batch dimension
-        self.mlp.append(nn.Flatten())
+        self.mlp = nn.Sequential(
+          # Flatten everything outside of batch dimension
+          nn.Flatten(),
 
-        # Fully connected layers
-        # All of the outputs of the GRU are taken (instead of just the final hidden
-        # output after all of the time samples).  Therefore, the number of "features"
-        # after flattening is the time length * the hidden size * number of directions
-        self.mlp.append(nn.Linear(
-            input_samples * num_classes * 1, 256
-        ))
-        self.mlp.append(nn.ReLU(inplace=True))
-        self.mlp.append(nn.BatchNorm1d(256))
-
-        self.mlp.append(nn.Linear(256, num_classes))
+          # Fully connected layers
+          # All of the outputs of the GRU are taken (instead of just the final hidden
+          # output after all of the time samples).  Therefore, the number of "features"
+          # after flattening is the time length * the hidden size * number of directions
+          nn.Linear(input_samples * num_classes * 1, 256),
+          nn.ReLU(inplace=True),
+          nn.BatchNorm1d(256),
+          nn.Linear(256, num_classes),
+        )
 
     def forward(self, x):
         x = torch.view_as_real(x)

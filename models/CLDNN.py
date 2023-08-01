@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from .ModelBase import ModelBase
 
-# https://github.com/brysef/rfml/blob/master/rfml/nn/model/cnn.py
+# https://github.com/brysef/rfml/blob/master/rfml/nn/model/cldnn.py
 class CLDNN(ModelBase):
     """
 
@@ -22,45 +22,47 @@ class CLDNN(ModelBase):
         learning_rate: float = 0.001,
         **kwargs
     ):
-        super().__init__(classes=classes, *kwargs)
+        super().__init__(classes=classes, **kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
         self.example_input_array = torch.zeros((1,input_channels,input_samples), dtype=torch.cfloat)
 
-        self.conv = nn.Sequential()
-        self.mlp = nn.Sequential()
-
         # Batch x 1-channel x input_samples x IQ 
-        self.conv.append(nn.Conv2d(
-            in_channels=input_channels,
-            out_channels=256,
-            kernel_size=(3,1),
-            padding='same',
-        ))
-        self.conv.append(nn.ReLU())
+        self.conv = nn.Sequential(
+            nn.Conv2d(
+                in_channels=input_channels,
+                out_channels=256,
+                kernel_size=(3,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.Dropout2d(0.5),
+            nn.Conv2d(
+                in_channels=256,
+                out_channels=256,
+                kernel_size=(3,2),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.Dropout2d(0.5),
+            nn.Conv2d(
+                in_channels=256,
+                out_channels=80,
+                kernel_size=(3,1),
+                padding='same',
+            ),
+            nn.ReLU(),
+            nn.Dropout2d(0.5),
+            nn.Conv2d(
+                in_channels=80,
+                out_channels=80,
+                kernel_size=(3,1),
+                padding='same',
+            ),
+            nn.Dropout2d(0.5),
+        )
 
-        self.conv.append(nn.Conv2d(
-            in_channels=256,
-            out_channels=256,
-            kernel_size=(3,2),
-            padding='same',
-        ))
-        self.conv.append(nn.ReLU())
-
-        self.conv.append(nn.Conv2d(
-            in_channels=256,
-            out_channels=80,
-            kernel_size=(3,1),
-            padding='same',
-        ))
-        self.conv.append(nn.ReLU())
-        self.conv.append(nn.Conv2d(
-            in_channels=80,
-            out_channels=80,
-            kernel_size=(3,1),
-            padding='same',
-        ))
 
         self.gru = nn.LSTM(
             input_size=80*2,  # 80 channels * IQ (2)
@@ -71,13 +73,15 @@ class CLDNN(ModelBase):
             dropout=0.6
         )
 
-        self.mlp.append(nn.Flatten())
-
         # Batch x Features
-        self.mlp.append(nn.LazyLinear(128))
-        self.mlp.append(nn.ReLU())
-        self.mlp.append(nn.Dropout1d(0.6))
-        self.mlp.append(nn.Linear(128, len(classes)))
+        self.mlp = nn.Sequential(
+            nn.Flatten(),
+            nn.LazyLinear(128),
+            nn.ReLU(),
+            nn.Dropout1d(0.5),
+            nn.Linear(128, len(classes)),
+        )
+
 
     def forward(self, x: torch.Tensor):
         x = torch.view_as_real(x)

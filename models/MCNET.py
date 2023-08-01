@@ -193,7 +193,7 @@ class MCNET(ModelBase):
         learning_rate: float = 0.001,
         **kwargs
     ):
-        super().__init__(classes=classes, *kwargs)
+        super().__init__(classes=classes, **kwargs)
 
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
@@ -208,12 +208,12 @@ class MCNET(ModelBase):
 
         self.Mblock2 = MBlock(128)
 
-        self.skip3pool = nn.MaxPool2d((2,2), stride=(2,1), padding=(1,1))
+        self.skip3pool = nn.MaxPool2d((3,1), stride=(2,1), padding=(1,0))
         self.Mblockp3 = MBlockP(128)
 
         self.Mblock4 = MBlock(128)
 
-        self.skip5pool = nn.MaxPool2d((2,2), stride=(2,1), padding=(1,1))
+        self.skip5pool = nn.MaxPool2d((3,1), stride=(2,1), padding=(1,0))
         self.Mblockp5 = MBlockP(128)
 
         self.Mblock6 = MBlock(128)
@@ -233,14 +233,14 @@ class MCNET(ModelBase):
         y = y_1 + y_2
 
         y_2 = self.Mblock2(y)
-        y += y_2
+        y = y + y_2
 
         y_1 = self.skip3pool(y)
         y_2 = self.Mblockp3(y)
         y = y_1 + y_2
 
         y_2 = self.Mblock4(y)
-        y += y_2
+        y = y + y_2
 
         y_1 = self.skip5pool(y)
         y_2 = self.Mblockp5(y)

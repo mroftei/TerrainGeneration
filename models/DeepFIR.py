@@ -15,7 +15,7 @@ class DeepFIR(ModelBase):
         learning_rate: float = 0.001,
         **kwargs
     ):
-        super().__init__(classes=classes, *kwargs)
+        super().__init__(classes=classes, **kwargs)
         
         self.loss = nn.CrossEntropyLoss() 
         self.lr = learning_rate
