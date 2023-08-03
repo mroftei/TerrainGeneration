@@ -46,7 +46,7 @@ def train(model, dm, name, epochs=40, precision="32", debug=False):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--model", type=str, default='LSTM2')
+    parser.add_argument("--model", type=str, default='CNN1')
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--bs", type=int, default=256)
     parser.add_argument("--nrx", type=int, default=6)

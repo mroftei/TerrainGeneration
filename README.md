@@ -59,23 +59,18 @@ K. Tekbıyık, A. R. Ekti, A. Görçin, G. K. Kurt, and C. Keçeci, “Robust an
 
 
 ## Models
-Model Performance on CSPB2018 v2 test dataset 
+Model Performance on CSPB2018 v2 test dataset s
 | Dataset   | 1 chan | 6 chan |
 |-----------|--------|--------|
-| CNN1      |  | 0.7366 |
-| CNN2      |  |  |
-| MCNET     |  |  |
-| IC-AMCNET |  |  |
-| ResNet    |  |  |
-| DenseNet  |  |  |
-| GRU       |  | 0.7337 |
-| LSTM      | 0.6744 | 0.7566 |
-| DAE       |  |  |
-| MCLDNN    |  | 0.7331 |
-| CLDNN     |  |  |
-| CLDNN2    |  |  |
-| CGDNet    |  |  |
-| PET-CGDNN |  |  |
+| CNN1      | 0.6950 | 0.7889 |
+| MCNET     | 0.6259 | 0.6846 |
+| ResNet    | 0.6419 | 0.7058 |
+| GRU2      | 0.6835 | 0.7601 |
+| LSTM2     | 0.6700 | 0.7768 |
+| MCLDNN    | 0.6795 | 0.7529 |
+| CLDNN2    | 0.6370 | 0.6962 |
+| CNNBlocks | 0.6541 | 0.7303 |
+| DeepFIR   | 0.6540 | 0.7293 |
 ### ConvBlocks
 Convolutional model with 5 blocks of 2 Convolutions with Max Pooling after each block. Classifier is a 3-layer MLP.
 
