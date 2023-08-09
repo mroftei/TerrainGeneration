@@ -1,41 +1,56 @@
-from typing import Any, Tuple
+from typing import Any, List, Tuple
 import pytorch_lightning as pl
 import h5py
 import os
 import numpy as np
-import pandas as pd
 import torch
 from torch import Tensor
-from torch.utils.data import TensorDataset, Dataset, DataLoader, random_split
-from tqdm import tqdm
+from torch.utils.data import Dataset, DataLoader, random_split
 import scipy.constants as constants
 
-class MultipointRxTransform:
-    def __init__(self, n_rx, min_d, max_d, cf):
+class MultiRxTransform:
+    def __init__(self, n_rx):
         self.n_rx = n_rx
-        self.min_d = min_d
-        self.max_d = max_d
-        self.cf = cf
     def __call__(self, sample: Tuple[Tensor]) -> Tuple[Tensor]:
-        x, y, snr, t0 = sample
-        noise = torch.randn((self.n_rx, x.shape[1]), dtype=torch.complex64)
+        x, y, t0 = sample
 
-        d = torch.rand((self.n_rx))
-        d = (self.min_d - self.max_d) * d + self.max_d
-        fsl = (4*np.pi*d*self.cf/constants.c)**2
-        fsl = 10*torch.log10(fsl)
-        fsl_delta = fsl - torch.min(fsl)
-        snr = snr - fsl_delta
-        target_snr_linear = 10 ** (snr / 10)
+        return (x.repeat((self.n_rx,1)), y, t0)
+
+class MultichannelNoiseTransform:
+    """
+    Multichannel noise, now independently distributed! FSPL calculations commented out
+    """
+    def __init__(self, min_snr, max_snr, generators: List[torch.Generator]):
+        self.min_snr = min_snr
+        self.max_snr = max_snr
+        self.generators = generators
+
+    def __call__(self, sample: Tuple[Tensor]) -> Tuple[Tensor]:
+        x, y, t0 = sample
+        noise = [torch.randn((1, x.shape[1]), dtype=torch.complex64, generator=gen) for gen in self.generators]
+        noise = torch.cat(noise)
+
+        # FSPL
+        # d = torch.rand((self.n_rx))
+        # d = (self.min_d - self.max_d) * d + self.max_d
+        # fsl = (4*np.pi*d*self.cf/constants.c)**2
+        # fsl = 10*torch.log10(fsl)
+        # fsl_delta = fsl - torch.min(fsl)
+        # snr = snr - fsl_delta
+
+        snr = [torch.rand((1,), generator=gen) for gen in self.generators]
+        snr = torch.cat(snr)
+        snr = (self.min_snr - self.max_snr) * snr + self.max_snr # scale snr to min and max snr
 
         occupied_bw = 1 / t0
         signal_power = torch.mean(torch.abs(x) ** 2)
+        target_snr_linear = 10 ** (snr / 10)
         signal_scale_linear = torch.sqrt((target_snr_linear * occupied_bw) / signal_power)
         x1 = x * signal_scale_linear[:,None] + noise
         return (x1, y, snr)
 
 class TensorTransformDataset(Dataset[Tuple[Tensor, ...]]):
-    r"""Dataset wrapping tensors. INcludes support for Transforms
+    r"""Dataset wrapping tensors. Includes support for Transforms
 
     Each sample will be retrieved by indexing tensors along the first dimension. 
     Transforms will be passed the enire sample.
@@ -61,15 +76,14 @@ class TensorTransformDataset(Dataset[Tuple[Tensor, ...]]):
         return self.tensors[0].size(0)
 
 class CSPB2018DataModule_v2(pl.LightningDataModule):
-    def __init__(self, dataset_path: str, batch_size, frame_size: int = 1024, n_rx: int = 1, min_d = 1000, max_d = 10000, cf = 900e6, seed: int = 42):
+    def __init__(self, dataset_path: str, batch_size, frame_size: int = 1024, n_rx: int = 1, min_snr = 0, max_snr = 13, seed: int = 42):
         super().__init__()
         self.dataset_path = os.path.expanduser(dataset_path)
         self.batch_size = batch_size
         self.frame_size = frame_size
         self.n_rx = n_rx
-        self.min_d = min_d
-        self.max_d = max_d
-        self.cf = cf
+        self.min_snr = min_snr
+        self.max_snr = max_snr
         self.rng = torch.Generator().manual_seed(seed)
 
         self.classes = ['bpsk', 'qpsk', '8psk', 'dqpsk', 'msk', '16qam', '64qam', '256qam']
@@ -99,13 +113,14 @@ class CSPB2018DataModule_v2(pl.LightningDataModule):
         t0 = torch.repeat_interleave(t0, reshape_factor)
         # snr = torch.repeat_interleave(snr, reshape_factor, 0)
 
-        snr = torch.rand(x.shape[0], generator=self.rng) * 13
+        gens = [torch.Generator().manual_seed(self.rng.seed()+i) for i in range(self.n_rx)]
 
         transforms = [
-            MultipointRxTransform(self.n_rx, self.min_d, self.max_d, self.cf)
+            MultiRxTransform(self.n_rx),
+            MultichannelNoiseTransform(self.min_snr, self.max_snr, gens)
         ]
 
-        ds_full = TensorTransformDataset(x, y, snr, t0, transforms=transforms)
+        ds_full = TensorTransformDataset(x, y, t0, transforms=transforms)
 
         self.ds_train, self.ds_val, self.ds_test = random_split(ds_full, [0.6, 0.2, 0.2], generator = self.rng)
 

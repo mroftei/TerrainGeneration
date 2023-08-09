@@ -30,6 +30,7 @@ class ModelBase(pl.LightningModule):
     def on_test_start(self):
         # Initialize outputs list
         self.outputs_list = torch.zeros((len(self.trainer.datamodule.ds_test.indices), len(self.classes)))
+        self.snr_list = torch.empty((len(self.trainer.datamodule.ds_test.indices), self.trainer.datamodule.n_rx))
 
     def training_step(self, batch, batch_nb):
         data, target, _ = batch
@@ -102,6 +103,7 @@ class ModelBase(pl.LightningModule):
         batch_size = len(snr)
         batch_idx = batch_nb*batch_size
         self.outputs_list[batch_idx:batch_idx+batch_size] = output.detach().cpu()
+        self.snr_list[batch_idx:batch_idx+batch_size] = snr.detach().cpu()
 
     def on_test_epoch_end(self):
         metrics_dict = self.test_metrics.compute()
@@ -123,24 +125,32 @@ class ModelBase(pl.LightningModule):
         plt.tight_layout()
         self.logger.experiment.add_figure("test/cm", fig, global_step=self.global_step)
         
-        test_snr = self.trainer.datamodule.ds_test.dataset.tensors[2][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
+        test_snr = self.snr_list
         test_true = self.trainer.datamodule.ds_test.dataset.tensors[1][self.trainer.datamodule.ds_test.indices][:len(self.outputs_list)]
 
-        test_snr = torch.round(test_snr)
-        SNRs = torch.unique(test_snr).numpy(force=True)
+        test_snr = torch.round(test_snr).max(1).values # round and find max SNR for each indices
+        SNRs, snr_counts = torch.unique(test_snr, return_counts=True)
         F1s = []
         for snr in SNRs:
             ind = test_snr == snr
-            F1s.append(torchmetrics.functional.classification.multiclass_f1_score(self.outputs_list[ind].cpu(), test_true[ind], len(self.classes)).numpy(force=True))
+            F1s.append(torchmetrics.functional.classification.multiclass_f1_score(self.outputs_list[ind].cpu(), test_true[ind], len(self.classes)))
+        F1s = torch.stack(F1s)
         self.outputs_list = self.outputs_list.zero_()
 
         fig = plt.figure(figsize=(8, 4))
         ax = fig.subplots()
-        plt.plot(SNRs, F1s, linestyle='-', marker='o')
+        color = 'tab:blue'
+        ax.plot(SNRs, F1s, linestyle='-', marker='o', color=color)
         ax.set_title('SNR F1')
-        plt.xlabel('SNR')
-        plt.ylabel('F1')
-        plt.ylim(0,1)
-        plt.grid(True)
-        plt.tight_layout()
+        ax.set_xlabel('SNR')
+        ax.set_ylabel('F1', color=color)
+        ax.tick_params(axis='y', labelcolor=color)
+        ax.set_ylim(0,1)
+        ax.grid(True)
+
+        # ax2 = ax.twinx()
+        # color = 'tab:red'
+        # ax2.set_ylabel('Samples @ SNR', color=color)  # we already handled the x-label with ax1
+        # ax2.bar(SNRs, snr_counts, color=color, alpha=0.2)
+        # ax2.tick_params(axis='y', labelcolor=color)
         self.logger.experiment.add_figure("test/snr_f1", fig, global_step=self.global_step)
