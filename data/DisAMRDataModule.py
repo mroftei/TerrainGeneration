@@ -75,7 +75,7 @@ class TensorTransformDataset(Dataset[Tuple[Tensor, ...]]):
     def __len__(self):
         return self.tensors[0].size(0)
 
-class CSPB2018DataModule_v2(pl.LightningDataModule):
+class DisAMRDataModule(pl.LightningDataModule):
     def __init__(self, dataset_path: str, batch_size, frame_size: int = 1024, n_rx: int = 1, min_snr = 0, max_snr = 13, seed: int = 42):
         super().__init__()
         self.dataset_path = os.path.expanduser(dataset_path)
