@@ -4,6 +4,7 @@ import os
 from argparse import ArgumentParser
 from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.profilers import PyTorchProfiler
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateFinder, StochasticWeightAveraging
 
 from data.RML2018DataModule import RML2018DataModule
@@ -18,6 +19,15 @@ def train(model, dm, name, epochs=40, precision="32", debug=False):
         # LearningRateMonitor(logging_interval='step'),
         # StochasticWeightAveraging(swa_lrs=1e-2),
     ]
+    profiler = None
+    # profiler = PyTorchProfiler(
+    #     on_trace_ready=torch.profiler.tensorboard_trace_handler(logger.log_dir), 
+    #     record_shapes=True, 
+    #     profile_memory=True, 
+    #     with_stack=True, 
+    #     with_flops=True
+    # )
+
 
     trainer = Trainer(
         fast_dev_run=False, 
@@ -28,13 +38,14 @@ def train(model, dm, name, epochs=40, precision="32", debug=False):
         num_nodes=1,
         # strategy='ddp',
         sync_batchnorm=True,
-        deterministic=True,
+        deterministic='warn',
         precision=precision,
         enable_progress_bar=debug,
         max_epochs=epochs,
         # val_check_interval=1.0,
         default_root_dir=logger.log_dir,
-        gradient_clip_val=0.5
+        gradient_clip_val=0.5,
+        profiler=profiler
     )
     trainer.fit(model, datamodule=dm)
 
