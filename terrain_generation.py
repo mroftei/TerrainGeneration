@@ -8,7 +8,6 @@ from itertools import product
 import matplotlib.patches as mpatches
 from enum import IntEnum
 import json
-import os
 
 
 class TerrainType(IntEnum):

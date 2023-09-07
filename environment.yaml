@@ -19,3 +19,4 @@ dependencies:
   - seaborn
   - jupyterlab
   - ipywidgets  
+  - opensimplex
