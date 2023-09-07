@@ -13,7 +13,7 @@ import os
 
 class TerrainType(IntEnum):
     Open = 1
-    Suburban = 2
+    Foliage = 2
     City = 3
 
 
@@ -67,8 +67,8 @@ def resolve_map(pop_map, foliage_map):
             (pop_map > 0.3) & (pop_map < 0.8) & (foliage_map >= 0) & (foliage_map < 0.6)
         )
     ] = float(
-        TerrainType.Suburban
-    )  # Suburban
+        TerrainType.Foliage
+    )  # Foliage
     map[np.where((pop_map >= 0.8) & (foliage_map <= 0.5))] = float(
         TerrainType.City
     )  # City
@@ -89,7 +89,7 @@ def create_nodes(senders, recievers, sender_in_city, map, map_resolution):
 
 
 def compute_distances(senders, recievers, map, distance_metric="euclidean"):
-    distance_data = []
+    path_data = []
     for sender, reciever in product(senders, recievers):
         xSender, ySender = sender
         xReciever, yReciever = reciever
@@ -113,7 +113,7 @@ def compute_distances(senders, recievers, map, distance_metric="euclidean"):
         key_points = np.stack([xtrans_coords, ytrans_coords]).T
         point_pairs = sliding_window_view(key_points, 2, axis=0)
         distances = [pdist(pair, metric=distance_metric) for pair in point_pairs]
-        distance_data.append(
+        path_data.append(
             {
                 "key_points": key_points,
                 "reciever_coords": reciever,
@@ -122,10 +122,10 @@ def compute_distances(senders, recievers, map, distance_metric="euclidean"):
                 "distances": distances,
             }
         )
-    return distance_data
+    return path_data
 
 
-def plot_map(map, distance_data, show_signal_paths, highlight_senders, save_path):
+def plot_map(map, path_data, show_signal_paths, highlight_senders, save_path):
     fig, axes = plt.subplots(nrows=1, figsize=(10, 10))
     im = axes.imshow(map, origin="lower", cmap="Blues")
     values = np.unique(map.ravel())
@@ -133,7 +133,7 @@ def plot_map(map, distance_data, show_signal_paths, highlight_senders, save_path
         plt.show()
         return
 
-    for d in distance_data:
+    for d in path_data:
         key_points = d["key_points"]
         xtrans_coords, ytrans_coords = key_points[:, 0], key_points[:, 1]
         xSender, ySender = d["sender_coords"]
@@ -175,6 +175,28 @@ def generate_map(
     return_map_data=True,
     **map_config,
 ):
+    """Used to generation sender/ reciever maps with support for different terrain types
+
+    Args:
+        senders (int, optional): Sender count. Defaults to 1.
+        receivers (int, optional): Reciever count. Defaults to 10.
+        show_signal_paths (bool, optional): Enable plotting of signal paths from senders to recievers. Defaults to True.
+        highlight_senders (bool, optional): Distinguish senders when plotting. Defaults to True.
+        sender_in_city (bool, optional): Constraint sender location within city terrain boundaries. Defaults to True.
+        plot (bool, optional): Enable plotting. Defaults to False.
+        seed (int, optional): Seed used for rngs. Defaults to 163250507.
+        save_path (str, optional): If set disables interactive plotting and saves plot to filesystem. Defaults to "".
+        return_map_data (bool, optional): If set to True returns map and distance data. Defaults to True.
+
+    Returns:
+        List[Dict[str, np.array]]: List of records with data on all paths from all senders to all recievers Data includes the following:
+            key_points: list of coordinates for every terrain transition + sender/ reciever coordinates,
+            reciever_coords: xy coordinates of reciever,
+            sender_coords: xy coordinates of sender,
+            terrain_type: list of different terrain types encountered from sender to reciever,
+            distances: distances between key_points marking terrain transitions,
+
+    """
     opensimplex.seed(seed)
     np.random.seed(seed)
     random.seed(seed)
@@ -201,18 +223,20 @@ def generate_map(
     senders, recievers = create_nodes(
         senders, receivers, sender_in_city, map, map_config["map_resolution"]
     )
-    distance_data = compute_distances(senders, recievers, map)
+    path_data = compute_distances(senders, recievers, map)
     if plot:
-        plot_map(map, distance_data, show_signal_paths, highlight_senders, save_path)
+        plot_map(map, path_data, show_signal_paths, highlight_senders, save_path)
 
     if not return_map_data:
         return
 
-    return map, distance_data
+    return map, path_data
 
 
 if __name__ == "__main__":
     print("Generating map")
     default_map_config = json.load(open("default_map_config.json"))
-    generate_map(plot=True,return_map_data=False, save_path="test.png", **default_map_config)
+    a, b = generate_map(
+        plot=True, return_map_data=True, save_path="test.png", **default_map_config
+    )
     print("Done")
