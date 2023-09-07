@@ -9,11 +9,11 @@ import matplotlib.patches as mpatches
 from enum import IntEnum
 import json
 
-
+SEED = 163250507
 class TerrainType(IntEnum):
     Open = 1
     Foliage = 2
-    City = 3
+    Urban = 3
 
 
 def create_map(
@@ -69,14 +69,14 @@ def resolve_map(pop_map, foliage_map):
         TerrainType.Foliage
     )  # Foliage
     map[np.where((pop_map >= 0.8) & (foliage_map <= 0.5))] = float(
-        TerrainType.City
-    )  # City
+        TerrainType.Urban
+    )  # Urban
     return map
 
 
 def create_nodes(senders, recievers, sender_in_city, map, map_resolution):
     if sender_in_city:
-        city_points = np.stack(np.where(map == TerrainType.City)).T
+        city_points = np.stack(np.where(map == TerrainType.Urban)).T
         senders = city_points[np.random.randint(len(city_points), size=(senders)), :]
         senders[:, [0, 1]] = senders[
             :, [1, 0]
@@ -169,7 +169,7 @@ def generate_map(
     highlight_senders=True,
     sender_in_city=True,
     plot=False,
-    seed=163250507,
+    seed=SEED,
     save_path="",
     return_map_data=True,
     **map_config,
@@ -197,8 +197,7 @@ def generate_map(
 
     """
     opensimplex.seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+
 
     pop_map = create_map(
         map_config["pop_freq"],
@@ -233,6 +232,8 @@ def generate_map(
 
 
 if __name__ == "__main__":
+    np.random.seed(SEED)
+    random.seed(SEED)    
     print("Generating map")
     default_map_config = json.load(open("default_map_config.json"))
     a, b = generate_map(
