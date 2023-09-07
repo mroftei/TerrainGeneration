@@ -8,8 +8,12 @@ from itertools import product
 import matplotlib.patches as mpatches
 from enum import IntEnum
 import json
+from itertools import groupby
+from scipy.stats import mode
 
 SEED = 163250507
+
+
 class TerrainType(IntEnum):
     Open = 1
     Foliage = 2
@@ -86,8 +90,31 @@ def create_nodes(senders, recievers, sender_in_city, map, map_resolution):
     recievers = np.random.randint(map_resolution, size=(recievers, 2))
     return senders, recievers
 
+def get_consecutive_group(d):
+    v_last = d[0]
+    group = [v_last]
+    v_idx = 1
+    while v_idx < len(d):
+        v = d[v_idx]
+        if (v-1) != v_last:
+            yield(group)
+            v_last = d[v_idx]
+            group = [v_last]
+            v_idx += 1
+        else:
+            group.append(v)
+            v_last = v
+            v_idx += 1
+    yield group
 
-def compute_distances(senders, recievers, map, distance_metric="euclidean"):
+def compute_distances(
+    senders,
+    recievers,
+    map,
+    distance_metric="euclidean",
+    path_aggregation=True,
+    distance_aggregation_threshold=0.001,
+):
     path_data = []
     for sender, reciever in product(senders, recievers):
         xSender, ySender = sender
@@ -109,18 +136,66 @@ def compute_distances(senders, recievers, map, distance_metric="euclidean"):
         ytrans_coords = np.concatenate([[ySender], ytrans_coords, [yReciever]])
         # terrain type between last transition and reciever is the same
         terrain_types = map[ytrans_coords.astype(int), xtrans_coords.astype(int)][:-1]
-        key_points = np.stack([xtrans_coords, ytrans_coords]).T
-        point_pairs = sliding_window_view(key_points, 2, axis=0)
-        distances = [pdist(pair, metric=distance_metric) for pair in point_pairs]
-        path_data.append(
-            {
-                "key_points": key_points,
-                "reciever_coords": reciever,
-                "sender_coords": sender,
-                "terrain_type": terrain_types,
-                "distances": distances,
-            }
+        key_points = np.stack([xtrans_coords, ytrans_coords], axis=1)
+        point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
+        distances = np.array(
+            [pdist(pair, metric=distance_metric) for pair in point_pairs]
         )
+        new_path = {
+            "key_points": key_points,
+            "reciever_coords": reciever,
+            "sender_coords": sender,
+            "terrain_type": terrain_types,
+            "distances": distances,
+        }
+        if not path_aggregation:
+            path_data.append(new_path)
+            continue
+
+        map_diagonal = np.sqrt(np.sum(np.power(map.shape, 2)))
+        min_distance = distance_aggregation_threshold * map_diagonal
+        (min_distance_idxs,) = np.where(distances.flatten() < 10)
+        new_point_pairs = [
+            pair
+            for pair_idx, pair in enumerate(point_pairs)
+            if pair_idx not in min_distance_idxs
+        ]
+        new_point_pairs = np.array(new_point_pairs)
+        for pair_idx in range(len(new_point_pairs) - 1):
+            new_point_pairs[pair_idx, -1] = new_point_pairs[pair_idx + 1, 0]
+        key_points = np.unique(
+            np.concatenate(
+                [
+                    sender.reshape(-1, 2),
+                    new_point_pairs.reshape(-1, 2),
+                    reciever.reshape(-1, 2),
+                ],
+                axis=0,
+            ),
+            axis=0,
+        )
+        new_point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
+        new_distances = np.array(
+            [pdist(pair, metric=distance_metric) for pair in new_point_pairs]
+        )
+        
+        consecutive_group = get_consecutive_group(min_distance_idxs)
+        new_terrain_types = []
+        distance_idx = 0
+        while distance_idx < len(point_pairs):
+            if distance_idx not in min_distance_idxs:
+                new_terrain_types.append(terrain_types[distance_idx])
+                distance_idx += 1
+            else:
+                group = next(consecutive_group)
+                common_terrain_type = mode(terrain_types[group], keepdims=True).mode.item()
+                new_terrain_types.append(common_terrain_type)
+                distance_idx += len(group)
+
+        for i, j in get_idx_bounds_of_consecutive_groups(min_distance_idxs):
+            print(i, j)
+
+        path_data.append()
     return path_data
 
 
@@ -169,7 +244,7 @@ def generate_map(
     highlight_senders=True,
     sender_in_city=True,
     plot=False,
-    seed=SEED,
+    seed=SEED + 13123312312,
     save_path="",
     return_map_data=True,
     **map_config,
@@ -197,7 +272,6 @@ def generate_map(
 
     """
     opensimplex.seed(seed)
-
 
     pop_map = create_map(
         map_config["pop_freq"],
@@ -228,12 +302,12 @@ def generate_map(
     if not return_map_data:
         return
 
-    return map, path_data
+    return map, path_data, senders, receivers
 
 
 if __name__ == "__main__":
     np.random.seed(SEED)
-    random.seed(SEED)    
+    random.seed(SEED)
     print("Generating map")
     default_map_config = json.load(open("default_map_config.json"))
     a, b = generate_map(
