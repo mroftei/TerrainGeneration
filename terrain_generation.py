@@ -188,12 +188,12 @@ def generate_map(
         return_map_data (bool, optional): If set to True returns map and distance data. Defaults to True.
 
     Returns:
-        List[Dict[str, np.array]]: List of records with data on all paths from all senders to all recievers Data includes the following:
-            key_points: list of coordinates for every terrain transition + sender/ reciever coordinates,
+        List[Dict[str, np.array]]: Ordered list of records with data on all paths from all senders to all recievers Data includes the following:
+            key_points: Ordered list of coordinates for every terrain transition starting from sender to reciever,
             reciever_coords: xy coordinates of reciever,
             sender_coords: xy coordinates of sender,
-            terrain_type: list of different terrain types encountered from sender to reciever,
-            distances: distances between key_points marking terrain transitions,
+            terrain_type: Ordered list of different terrain types encountered from sender to reciever,
+            distances: Ordered list of distances between key_points marking terrain transitions from sender to reciever,
 
     """
     opensimplex.seed(seed)
