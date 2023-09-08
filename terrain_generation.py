@@ -10,14 +10,16 @@ from enum import IntEnum
 import json
 from itertools import groupby
 from scipy.stats import mode
+from matplotlib.lines import Line2D
 
-SEED = 163250507
+SEED = 1632505
 
 
 class TerrainType(IntEnum):
     Open = 1
     Foliage = 2
-    Urban = 3
+    Suburban = 3
+    Urban = 4
 
 
 def create_map(
@@ -64,17 +66,11 @@ def create_map(
 def resolve_map(pop_map, foliage_map):
     assert pop_map.shape == foliage_map.shape
     map = np.ones(pop_map.shape)
-    map[pop_map == 0] = float(TerrainType.Open)  # Terrain
-    map[
-        np.where(
-            (pop_map > 0.3) & (pop_map < 0.8) & (foliage_map >= 0) & (foliage_map < 0.6)
-        )
-    ] = float(
-        TerrainType.Foliage
-    )  # Foliage
-    map[np.where((pop_map >= 0.8) & (foliage_map <= 0.5))] = float(
-        TerrainType.Urban
-    )  # Urban
+    # map[pop_map == 0] = float(TerrainType.Open)  # Terrain
+    map[np.where(foliage_map> 0.7)] = float(TerrainType.Foliage)  # Foliage
+    # map[np.where((pop_map >= 0.8) & (foliage_map <= 0.5))] = float(TerrainType.Urban)  # Urban
+    map[np.where(pop_map >= 0.7)] = float(TerrainType.Suburban)
+    map[np.where(pop_map >= 0.9)] = float(TerrainType.Urban)
     return map
 
 
@@ -140,6 +136,8 @@ def compute_distances(
         terrain_types = map[ytrans_coords.astype(int), xtrans_coords.astype(int)][:-1]
         key_points = np.stack([xtrans_coords, ytrans_coords], axis=1)
         point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
+        if point_pairs.shape == (2, 2):
+            point_pairs = point_pairs[np.newaxis, ...]
         distances = np.array(
             [pdist(pair, metric=distance_metric) for pair in point_pairs]
         )
@@ -195,7 +193,7 @@ def compute_distances(
     return path_data
 
 
-def plot_map(map, path_data, show_signal_paths, highlight_senders, save_path):
+def plot_map(map, path_data, show_signal_paths, save_path):
     fig, axes = plt.subplots(nrows=1, figsize=(10, 10))
     im = axes.imshow(map, origin="lower", cmap="Blues")
     values = np.unique(map.ravel())
@@ -207,9 +205,10 @@ def plot_map(map, path_data, show_signal_paths, highlight_senders, save_path):
         key_points = d["key_points"]
         xtrans_coords, ytrans_coords = key_points[:, 0], key_points[:, 1]
         xSender, ySender = d["sender_coords"]
+        xReciever, yReciever = d["reciever_coords"]
         axes.plot(xtrans_coords, ytrans_coords, "rx-", zorder=0)
-        if highlight_senders:
-            axes.scatter(xSender, ySender, marker="o", color="y", s=50, zorder=10)
+        axes.scatter(xSender, ySender, marker="o", color="y", s=50, zorder=10)
+        axes.scatter(xReciever, yReciever, marker="o", color="g", s=50, zorder=10)
 
         axes.axis("image")
 
@@ -221,6 +220,8 @@ def plot_map(map, path_data, show_signal_paths, highlight_senders, save_path):
         )
         for v_idx, v in enumerate(values)
     ]
+    patches.extend([Line2D([], [], label="Reciever", color="white", marker='o', markerfacecolor="g")])
+    patches.extend([Line2D([], [], label="Sender", color="white", marker='o', markerfacecolor="y")])
     # put those patched as legend-handles into the legend
     plt.legend(handles=patches, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
     plt.grid(True)
@@ -237,7 +238,6 @@ def generate_map(
     senders=1,
     receivers=10,
     show_signal_paths=True,
-    highlight_senders=True,
     sender_in_city=True,
     plot=False,
     seed=SEED,
@@ -246,7 +246,6 @@ def generate_map(
     distance_aggregation_threshold=0.0187,
     **map_config,
 ):
-    print(distance_aggregation_threshold)
     """Used to generation sender/ reciever maps with support for different terrain types
 
     Args:
@@ -270,8 +269,6 @@ def generate_map(
 
     """
     opensimplex.seed(seed)
-    np.random.seed(seed)
-    random.seed(seed)
 
     pop_map = create_map(
         map_config["pop_freq"],
@@ -302,7 +299,7 @@ def generate_map(
         distance_aggregation_threshold=distance_aggregation_threshold,
     )
     if plot:
-        plot_map(map, path_data, show_signal_paths, highlight_senders, save_path)
+        plot_map(map, path_data, show_signal_paths, save_path)
 
     if not return_map_data:
         return
@@ -316,6 +313,6 @@ if __name__ == "__main__":
     print("Generating map")
     default_map_config = json.load(open("default_map_config.json"))
     generate_map(
-        plot=True, return_map_data=True, save_path="test.png", **default_map_config
+        sender_in_city=False, senders=10, receivers=2, plot=True, return_map_data=True, save_path="multi_sender.png", **default_map_config
     )
     print("Done")
