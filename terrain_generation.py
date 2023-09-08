@@ -90,14 +90,15 @@ def create_nodes(senders, recievers, sender_in_city, map, map_resolution):
     recievers = np.random.randint(map_resolution, size=(recievers, 2))
     return senders, recievers
 
+
 def get_consecutive_group(d):
     v_last = d[0]
     group = [v_last]
     v_idx = 1
     while v_idx < len(d):
         v = d[v_idx]
-        if (v-1) != v_last:
-            yield(group)
+        if (v - 1) != v_last:
+            yield (group)
             v_last = d[v_idx]
             group = [v_last]
             v_idx += 1
@@ -106,6 +107,7 @@ def get_consecutive_group(d):
             v_last = v
             v_idx += 1
     yield group
+
 
 def compute_distances(
     senders,
@@ -154,7 +156,7 @@ def compute_distances(
 
         map_diagonal = np.sqrt(np.sum(np.power(map.shape, 2)))
         min_distance = distance_aggregation_threshold * map_diagonal
-        (min_distance_idxs,) = np.where(distances.flatten() < 10)
+        (min_distance_idxs,) = np.where(distances.flatten() < min_distance)
         new_point_pairs = [
             pair
             for pair_idx, pair in enumerate(point_pairs)
@@ -174,28 +176,22 @@ def compute_distances(
             ),
             axis=0,
         )
-        new_point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
-        new_distances = np.array(
+        point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
+        distances = np.array(
             [pdist(pair, metric=distance_metric) for pair in new_point_pairs]
         )
-        
-        consecutive_group = get_consecutive_group(min_distance_idxs)
-        new_terrain_types = []
-        distance_idx = 0
-        while distance_idx < len(point_pairs):
-            if distance_idx not in min_distance_idxs:
-                new_terrain_types.append(terrain_types[distance_idx])
-                distance_idx += 1
-            else:
-                group = next(consecutive_group)
-                common_terrain_type = mode(terrain_types[group], keepdims=True).mode.item()
-                new_terrain_types.append(common_terrain_type)
-                distance_idx += len(group)
-
-        for i, j in get_idx_bounds_of_consecutive_groups(min_distance_idxs):
-            print(i, j)
-
-        path_data.append()
+        # Terrain types for small distance sections defaults to last distance's terrain type
+        terrain_types = [
+            t for idx, t in enumerate(terrain_types) if idx not in min_distance_idxs
+        ]
+        new_path = {
+            "key_points": key_points,
+            "reciever_coords": reciever,
+            "sender_coords": sender,
+            "terrain_type": terrain_types,
+            "distances": distances,
+        }
+        path_data.append(new_path)
     return path_data
 
 
@@ -244,11 +240,13 @@ def generate_map(
     highlight_senders=True,
     sender_in_city=True,
     plot=False,
-    seed=SEED + 13123312312,
+    seed=SEED,
     save_path="",
     return_map_data=True,
+    distance_aggregation_threshold=0.0187,
     **map_config,
 ):
+    print(distance_aggregation_threshold)
     """Used to generation sender/ reciever maps with support for different terrain types
 
     Args:
@@ -272,6 +270,8 @@ def generate_map(
 
     """
     opensimplex.seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
     pop_map = create_map(
         map_config["pop_freq"],
@@ -295,7 +295,12 @@ def generate_map(
     senders, recievers = create_nodes(
         senders, receivers, sender_in_city, map, map_config["map_resolution"]
     )
-    path_data = compute_distances(senders, recievers, map)
+    path_data = compute_distances(
+        senders,
+        recievers,
+        map,
+        distance_aggregation_threshold=distance_aggregation_threshold,
+    )
     if plot:
         plot_map(map, path_data, show_signal_paths, highlight_senders, save_path)
 
@@ -310,7 +315,7 @@ if __name__ == "__main__":
     random.seed(SEED)
     print("Generating map")
     default_map_config = json.load(open("default_map_config.json"))
-    a, b = generate_map(
+    generate_map(
         plot=True, return_map_data=True, save_path="test.png", **default_map_config
     )
     print("Done")
