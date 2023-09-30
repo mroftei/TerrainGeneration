@@ -113,7 +113,7 @@ class DisAMRScenarioGenerator:
             xtrans_coords, ytrans_coords = key_points[:, 0], key_points[:, 1]
             xSender, ySender = d["sender_coords"]
             xReciever, yReciever = d["reciever_coords"]
-            axes.plot(xtrans_coords, ytrans_coords, "rx-", zorder=0)
+            axes.plot(xtrans_coords[::-1], ytrans_coords[::-1], "rx-", zorder=0)
             axes.scatter(xSender, ySender, marker="o", color="y", s=50, zorder=10)
             axes.scatter(xReciever, yReciever, marker="o", color="g", s=50, zorder=10)
 
@@ -264,7 +264,8 @@ class DisAMRScenarioGenerator:
             if not path_aggregation:
                 path_data.append(new_path)
                 continue
-
+            
+            # Filter out pairs with small distances
             map_diagonal = np.sqrt(np.sum(np.power(map.shape, 2)))
             min_distance = distance_aggregation_threshold * map_diagonal
             (min_distance_idxs,) = np.where(distances.flatten() < min_distance)
@@ -273,18 +274,33 @@ class DisAMRScenarioGenerator:
                 for pair_idx, pair in enumerate(point_pairs)
                 if pair_idx not in min_distance_idxs
             ]
+            # Assume terrain types for small distance sections defaults to nearest largest distance's terrain type
+            terrain_types = [
+                t for idx, t in enumerate(terrain_types) if idx not in min_distance_idxs
+            ]
+            # Force sender and reciever at first and last pairs
+            new_point_pairs[0] = np.stack((sender, new_point_pairs[0][-1]))
+            new_point_pairs[-1] = np.stack((new_point_pairs[-1][0], reciever))
             new_point_pairs = np.array(new_point_pairs)
+            
+            # Connect pairs
             for pair_idx in range(len(new_point_pairs) - 1):
                 new_point_pairs[pair_idx, -1] = new_point_pairs[pair_idx + 1, 0]
+                
+            # Further consolidate pairs based on terrain equivalence
+            temp = []
+            i = 0
+            while i < len(new_point_pairs):
+                j = i+1
+                while j < len(new_point_pairs) and terrain_types[i]==terrain_types[j]:
+                    j += 1
+                temp.append(np.stack((new_point_pairs[i][0], new_point_pairs[j-1][-1])))
+                i = j
+            new_point_pairs = temp
+            
+            # Extract key points
             key_points, ind = np.unique(
-                np.concatenate(
-                    [
-                        sender.reshape(-1, 2),
-                        new_point_pairs.reshape(-1, 2),
-                        reciever.reshape(-1, 2),
-                    ],
-                    axis=0,
-                ),
+                np.concatenate(new_point_pairs),
                 axis=0,
                 return_index=True
             )
@@ -293,10 +309,7 @@ class DisAMRScenarioGenerator:
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
             )
-            # Terrain types for small distance sections defaults to last distance's terrain type
-            terrain_types = [
-                t for idx, t in enumerate(terrain_types) if idx not in min_distance_idxs
-            ]
+
             new_path = {
                 "key_points": key_points,
                 "reciever_coords": reciever,
@@ -305,7 +318,6 @@ class DisAMRScenarioGenerator:
                 "distances": distances,
             }
             path_data.append(new_path)
-        json.dump({k: v.tolist() if isinstance(v, np.ndarray) else v for k,v in new_path.items()}, open("path_data_w_agg.json", "w"), indent=4)
         return path_data
 
 
@@ -314,5 +326,5 @@ if __name__ == "__main__":
     np.random.seed(seed)
     random.seed(seed)
     print("Generating map")
-    scen_gen = DisAMRScenarioGenerator(seed=seed)
+    scen_gen = DisAMRScenarioGenerator(seed=seed, n_receivers=10)
     scen_gen.PlotMap(save_path="C_.png")
