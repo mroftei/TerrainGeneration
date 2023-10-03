@@ -36,6 +36,8 @@ class Direction(IntEnum):
     Right = 4
     Towards = 5
     Away = 6
+    Clockwise = 7
+    CounterClockwise = 8
 
 
 class DisAMRScenarioGenerator:
@@ -43,10 +45,11 @@ class DisAMRScenarioGenerator:
         self,
         n_receivers=1,
         resolution=500,
-        min_dist=5,
+        min_receiver_dist=2000,
+        min_path_distance=500,
         seed=42,
         meters_per_pixel=10,
-        max_received_power=-6700,
+        max_received_power=-5550,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -54,7 +57,8 @@ class DisAMRScenarioGenerator:
         self.n_rx = n_receivers
         self.n_tx = 1
         self.resolution = resolution
-        self.min_dist = min_dist * meters_per_pixel
+        self.min_receiver_dist = min_receiver_dist / meters_per_pixel
+        self.min_path_distance = min_path_distance / meters_per_pixel
         self.rng = np.random.default_rng(seed=seed)
         self.fns = pyfastnoisesimd.Noise(seed=seed, numWorkers=1)
         self.fns.noiseType = pyfastnoisesimd.NoiseType.Simplex
@@ -99,8 +103,11 @@ class DisAMRScenarioGenerator:
 
         map_diagonal = np.sqrt(np.sum(np.power(self.map.shape, 2)))
 
-        if self.min_dist > map_diagonal:
-            raise Exception("Invalid min distance and map size specified")
+        if self.min_receiver_dist > map_diagonal:
+            raise Exception("Invalid min receiver distance and map size specified")
+
+        if self.min_path_distance > map_diagonal:
+            raise Exception("Invalid min path distance and map size specified")
 
         self.transmitters, self.receivers = self.create_nodes(
             senders_in_city, self.map, self.resolution
@@ -124,9 +131,9 @@ class DisAMRScenarioGenerator:
 
         return transmitters, receivers
 
-    def move(self, from_coord, direction, to_coord=None, magnitude=1):
+    def move(self, from_coord, direction, relative_to_coord=None, magnitude=1):
         x, y = from_coord
-        if to_coord is None:
+        if relative_to_coord is None:
             if direction in [Direction.Left, Direction.Right]:
                 magnitude = -magnitude if direction == Direction.Left else magnitude
                 x_delta = magnitude
@@ -136,23 +143,34 @@ class DisAMRScenarioGenerator:
                 x_delta = 0
                 y_delta = magnitude
         else:
-            if direction not in [Direction.Towards, Direction.Away]:
-                raise Exception("Invalid direction specified")
-            x_target, y_target = to_coord
+            if direction in [Direction.Towards, Direction.Away]:
+                x_target, y_target = relative_to_coord
 
-            eps = np.finfo(np.float32).eps
-            hyp_c = sqrt((y_target - y) ** 2 + (x_target - x) ** 2) + eps
-            x_delta = magnitude * (x_target - x + eps) / hyp_c
-            y_delta = magnitude * (y_target - y + eps) / hyp_c
-            if direction == Direction.Away:
-                x_delta *= -1
-                y_delta *= -1
+                eps = np.finfo(np.float32).eps
+                hyp_c = sqrt((y_target - y) ** 2 + (x_target - x) ** 2) + eps
+                x_delta = magnitude * (x_target - x + eps) / hyp_c
+                y_delta = magnitude * (y_target - y + eps) / hyp_c
+                if direction == Direction.Away:
+                    x_delta *= -1
+                    y_delta *= -1
+
+            elif direction in [Direction.Clockwise, Direction.CounterClockwise]:
+                x_target, y_target = relative_to_coord
+                x_target, y_target = x - x_target, y - y_target
+                if direction == Direction.CounterClockwise:
+                    x_target, y_target = -y_target, x_target
+                else:
+                    x_target, y_target = y_target, -x_target
+                target = np.array([x_target, y_target])
+                target = target / np.linalg.norm(target)
+                x_delta = target[0] * magnitude
+                y_delta = target[-1] * magnitude
 
         x += x_delta
         y += y_delta
 
         new_coord = np.array([x, y])
-        new_coord = np.clip(new_coord, 0, self.resolution-1)
+        new_coord = np.clip(new_coord, 0, self.resolution - 1)
 
         return new_coord
 
@@ -162,18 +180,18 @@ class DisAMRScenarioGenerator:
         receivers,
         max_received_power,
         error=0.01,
-        initial_magnitude=10,
-        iteration_max=500,
-        save_metrics=True
+        initial_magnitude=1,
+        iteration_max=100,
+        save_metrics=True,
     ):
         dist = cdist(transmitters, receivers, "euclidean").min()
-        path_data = self._computeDistances(transmitters, receivers, self.map)
-        while dist < self.min_dist:
+        while dist < self.min_receiver_dist:
             receivers = np.random.randint(0, self.resolution, size=(self.n_rx, 2))
             dist = cdist(transmitters, receivers, "euclidean").min()
         if max_received_power == inf:
             return receivers
 
+        path_data = self._computeDistances(transmitters, receivers, self.map)
         power = self.calc_scenario_received_power(path_data)
         iteration_idx = 0
         reciever_lengths = []
@@ -189,26 +207,24 @@ class DisAMRScenarioGenerator:
                 )
                 power = self.calc_scenario_received_power(path_data)
                 diff = power - max_received_power
-                direction = (
-                    Direction.Away
-                    if diff > 0
-                    else Direction.Towards
-                )
+                direction = Direction.Away if diff > 0 else Direction.Towards
                 receiver = self.move(
-                    receiver, direction, magnitude=magnitude, to_coord=sender
+                    receiver, direction, magnitude=magnitude, relative_to_coord=sender
                 )
+                dist = cdist([sender], [receiver], "euclidean").item()
+                if dist < self.min_receiver_dist:
+                    continue
                 receiver_data = next(
                     iter(
                         self._computeDistances(
-                            [sender], [receiver], self.map, path_aggregation=False
+                            [sender], [receiver], self.map, path_aggregation=True
                         )
                     )
                 )
-                dist = sum(receiver_data["distances"]).item()
                 d[f"receiver_{i}"] = sum(path_data[i]["distances"]).item()
                 d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
-                if dist > self.min_dist:
-                    path_data[i] = receiver_data
+                path_data[i] = receiver_data
+
             power = self.calc_scenario_received_power(path_data)
             d["power"] = power
             reciever_lengths.append(d)
@@ -372,7 +388,7 @@ class DisAMRScenarioGenerator:
                 point_pairs = point_pairs[np.newaxis, ...]
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            ) * self.mpp
+            )
             new_path = {
                 "key_points": key_points,
                 "receiver_coords": receiver,
@@ -380,6 +396,7 @@ class DisAMRScenarioGenerator:
                 "terrain_type": terrain_types,
                 "distances": distances,
             }
+            old_distances = distances.sum()
             if not path_aggregation:
                 path_data.append(new_path)
                 continue
@@ -387,7 +404,7 @@ class DisAMRScenarioGenerator:
             # Filter out pairs with small distances
             # TODO: Is this arbitrary?
             # maximum min segment possible without eliminating all segments
-            min_distance = self.min_dist / len(distances)
+            min_distance = self.min_path_distance / len(distances)
             (min_distance_idxs,) = np.where(distances.flatten() < min_distance)
             new_point_pairs = [
                 pair
@@ -432,7 +449,7 @@ class DisAMRScenarioGenerator:
             )
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            ) * self.mpp
+            )
 
             new_path = {
                 "key_points": key_points,
@@ -441,6 +458,9 @@ class DisAMRScenarioGenerator:
                 "terrain_type": terrain_types,
                 "distances": distances,
             }
+            new_distances = distances.sum()
+            if abs(old_distances-new_distances) > 0.01:
+                raise Exception
             path_data.append(new_path)
         return path_data
 
@@ -562,7 +582,8 @@ class DisAMRScenarioGenerator:
         total = 0
         for pdata in path_data:
             # TODO: Confirm [-1] and fc, h_ut and los defaults
-            cumsum_d = np.cumsum(pdata["distances"])
+            distances = pdata["distances"]*self.mpp
+            cumsum_d = np.cumsum(distances)
             for d in cumsum_d:
                 # urban_pl = self.urban_path_loss(d, d, fc, h_ut, los).flatten()
                 rural_pl = self.rural_path_loss(d, d, fc, h_ut, los).flatten()
@@ -582,7 +603,7 @@ class DisAMRScenarioGenerator:
         return total
 
     def calc_scenario_received_power(self, path_data):
-        return MAGIC_CONSTANT - self.calc_scenario_pl(path_data)
+        return -self.calc_scenario_pl(path_data)
 
 
 if __name__ == "__main__":
