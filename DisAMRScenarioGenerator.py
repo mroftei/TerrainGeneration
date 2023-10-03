@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from math import inf, sqrt
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
-MAGIC_CONSTANT = 1e8
+MAGIC_CONSTANT = 1e3
 
 class TerrainType(IntEnum):
     Open = 1
@@ -35,7 +35,7 @@ class Direction(IntEnum):
     Away = 6
 
 class DisAMRScenarioGenerator:
-    def __init__(self, n_receivers=1, resolution=1024, min_dist=50, seed=42, max_received_power=10) -> None:
+    def __init__(self, n_receivers=1, resolution=1024, min_dist=50, seed=42, max_received_power=0.9) -> None:
         self.map = []
         self.transmitters = []
         self.receivers = []
@@ -144,32 +144,31 @@ class DisAMRScenarioGenerator:
     def RegenerateReceivers(self, transmitters, receivers, max_received_power):
         dist = cdist(transmitters, receivers, "euclidean").min()
         path_data = self._computeDistances(transmitters, receivers, self.map)
-        # Find a way to increase lower bound to limit max power
-        coordinates_lower_bound = 0
         while dist < self.min_dist:
-            receivers = np.random.randint(coordinates_lower_bound, self.resolution, size=(self.n_rx, 2))
+            receivers = np.random.randint(0, self.resolution, size=(self.n_rx, 2))
             dist = cdist(transmitters, receivers, "euclidean").min()
         if max_received_power == inf:
             return receivers
 
         power = self.calc_scenario_received_power(path_data)
         iteration_idx = 0
-        reciever_lengths = []
         iteration_max = 500
         error = 0.01
+        prereceivers = [p['receiver_coords'] for p in path_data]
         while abs(power - max_received_power) > error and iteration_idx < iteration_max:
-            d = {}
             for i in range(len(path_data)):
                 sender, receiver = path_data[i]['sender_coords'], path_data[i]['receiver_coords']
                 power = self.calc_scenario_received_power(path_data)
                 direction = Direction.Away if power - max_received_power > 0 else Direction.Towards
                 receiver = self.move(receiver, direction, magnitude=5, to_coord=sender)
-                path_data[i] = next(iter(self._computeDistances([sender], [receiver], self.map)))
-                d[f"receiver_{i}"] = sum(path_data[i]['distances']).item()
-                d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
+                # TODO: Ignore receivers that need to move too close
+                receiver_data = next(iter(self._computeDistances([sender], [receiver], self.map, path_aggregation=False)))
+                dist = sum(receiver_data['distances']).item()
+                if dist > self.min_dist:
+                    path_data[i] = receiver_data
+                
             power = self.calc_scenario_received_power(path_data)
-            d['power'] = power
-            reciever_lengths.append(d)
+            receivers = [p['receiver_coords'] for p in path_data]
             iteration_idx += 1
         return receivers
 
@@ -397,9 +396,8 @@ class DisAMRScenarioGenerator:
             path_data.append(new_path)
         return path_data
     
-    def rural_path_loss(self, distance_2d, distance_3d, fc_ghz, los):
+    def rural_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los):
         h_bs = 25
-        h_ut = 5
         average_building_height = 5.0
         average_street_width = 20
 
@@ -487,22 +485,21 @@ class DisAMRScenarioGenerator:
         return pl
 
     def calc_scenario_pl(self, path_data, fc=2.45, h_ut=5, los=False):
-        # TODO: dummy until I get the fixed version
-        total = sum([np.sum(data['distances']) for data in path_data])*self.resolution
-        # for data in path_data:    
-        #     cumsum_d = np.cumsum(data['distances'])[None]
-        #     urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
-        #     rural_pl = self.rural_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
-        #     extra_urban_pl = np.diff(urban_pl)
-        #     extra_rural_pl = np.diff(rural_pl)
+        total = 0
+        for pdata in path_data:    
+            cumsum_d = np.cumsum(pdata['distances'])[-1]
+            urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
+            rural_pl = self.rural_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
+            extra_urban_pl = np.diff(urban_pl)
+            extra_rural_pl = np.diff(rural_pl)
 
-        #     pl = urban_pl[0] if path_data['terrain_type'][0] > 0 else rural_pl[0]
-        #     for i in range(len(extra_urban_pl)):
-        #         if path_data['terrain_type'][i+1] > 0:
-        #             pl += extra_urban_pl[i]
-        #         else:
-        #             pl += extra_rural_pl[i]
-        #     total += pl
+            pl = urban_pl[0] if pdata['terrain_type'][0] > 0 else rural_pl[0]
+            for i in range(len(extra_urban_pl)):
+                if pdata['terrain_type'][i+1] > 0:
+                    pl += extra_urban_pl[i]
+                else:
+                    pl += extra_rural_pl[i]
+            total += pl
 
         return total
 
