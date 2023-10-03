@@ -14,10 +14,10 @@ import json
 import scipy.constants
 import numpy as np
 import matplotlib.pyplot as plt
-from math import inf
+from math import inf, sqrt
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
-MAGIC_CONSTANT = 1000
+MAGIC_CONSTANT = 1e8
 
 class TerrainType(IntEnum):
     Open = 1
@@ -35,7 +35,7 @@ class Direction(IntEnum):
     Away = 6
 
 class DisAMRScenarioGenerator:
-    def __init__(self, n_receivers=1, resolution=1024, min_dist=5, seed=42, max_received_power=10) -> None:
+    def __init__(self, n_receivers=1, resolution=1024, min_dist=50, seed=42, max_received_power=10) -> None:
         self.map = []
         self.transmitters = []
         self.receivers = []
@@ -84,6 +84,11 @@ class DisAMRScenarioGenerator:
         )
         self.map = self._resolveMap(pop_map, foliage_map)
 
+        map_diagonal = np.sqrt(np.sum(np.power(self.map.shape, 2)))
+        
+        if self.min_dist > map_diagonal:
+            raise Exception("Invalid min distance and map size specified")
+
         self.transmitters, self.receivers = self.create_nodes(
             senders_in_city, self.map, self.resolution
         )
@@ -118,27 +123,23 @@ class DisAMRScenarioGenerator:
         else:
             if direction not in [Direction.Towards, Direction.Away]:
                 raise Exception("Invalid direction specified")
-            if direction == Direction.Away:
-                magnitude *= -1
             x_target, y_target = to_coord
-            x_delta = x_target - x
-            # TODO: This is wrong
-            x_delta = magnitude if x_delta > 0 else x_delta
-            x_delta = -magnitude if x_delta < 0 else x_delta
-            y_delta = y_target - y
-            y_delta = magnitude if y_delta > 0 else y_delta
-            y_delta = -magnitude if y_delta < 0 else y_delta
+
+            eps = np.finfo(np.float32).eps
+            hyp_c = sqrt((y_target-y)**2+(x_target-x)**2)+eps
+            x_delta = magnitude*(x_target-x+eps)/hyp_c
+            y_delta = magnitude*(y_target-y+eps)/hyp_c
+            if direction == Direction.Away:
+                x_delta *= -1
+                y_delta *= -1
         
         x += x_delta
         y += y_delta
         
-        x = 0 if x < 0 else x
-        x = self.resolution if x > self.resolution else x
-        y = 0 if x < 0 else x
-        y = self.resolution if x > self.resolution else x
+        new_coord = np.array([x, y])
+        new_coord = np.clip(new_coord, 0, 1000)
 
-        from_coord = np.array([x, y])
-        return from_coord
+        return new_coord
 
     def RegenerateReceivers(self, transmitters, receivers, max_received_power):
         dist = cdist(transmitters, receivers, "euclidean").min()
@@ -150,21 +151,26 @@ class DisAMRScenarioGenerator:
             dist = cdist(transmitters, receivers, "euclidean").min()
         if max_received_power == inf:
             return receivers
-        for i in range(len(path_data)):
-            sender, receiver = path_data[i]['sender_coords'], path_data[i]['receiver_coords']
-            power = self.calc_scenario_received_power(path_data)
-            while power > max_received_power:
-                receiver = self.move(receiver, Direction.Away, to_coord=sender)
-                power = self.calc_scenario_received_power(path_data)
 
-            while power < max_received_power:
-                receiver = self.move(receiver, Direction.Towards, to_coord=sender)
+        power = self.calc_scenario_received_power(path_data)
+        iteration_idx = 0
+        reciever_lengths = []
+        iteration_max = 500
+        error = 0.01
+        while abs(power - max_received_power) > error and iteration_idx < iteration_max:
+            d = {}
+            for i in range(len(path_data)):
+                sender, receiver = path_data[i]['sender_coords'], path_data[i]['receiver_coords']
                 power = self.calc_scenario_received_power(path_data)
-            
-            
-        remaining_power_budget = max_received_power - received_power
-        last_receiver = path_data[-1]
-        received_power = self.calc_scenario_received_power(last_receiver)
+                direction = Direction.Away if power - max_received_power > 0 else Direction.Towards
+                receiver = self.move(receiver, direction, magnitude=5, to_coord=sender)
+                path_data[i] = next(iter(self._computeDistances([sender], [receiver], self.map)))
+                d[f"receiver_{i}"] = sum(path_data[i]['distances']).item()
+                d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
+            power = self.calc_scenario_received_power(path_data)
+            d['power'] = power
+            reciever_lengths.append(d)
+            iteration_idx += 1
         return receivers
 
     def GetScenario(
@@ -291,7 +297,6 @@ class DisAMRScenarioGenerator:
         map,
         distance_metric="euclidean",
         path_aggregation=True,
-        distance_aggregation_threshold=0.0187,
     ):
         path_data = []
         for sender, receiver in product(senders, receivers):
@@ -335,8 +340,9 @@ class DisAMRScenarioGenerator:
                 continue
             
             # Filter out pairs with small distances
-            map_diagonal = np.sqrt(np.sum(np.power(map.shape, 2)))
-            min_distance = distance_aggregation_threshold * map_diagonal
+            # TODO: Is this arbitrary?
+            # maximum min segment possible without eliminating all segments
+            min_distance = self.min_dist / len(distances)
             (min_distance_idxs,) = np.where(distances.flatten() < min_distance)
             new_point_pairs = [
                 pair
@@ -374,7 +380,9 @@ class DisAMRScenarioGenerator:
                 return_index=True
             )
             key_points = key_points[np.argsort(ind)]
-            point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
+            
+            # Recompute distances
+            point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze(axis=1)
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
             )
@@ -480,7 +488,7 @@ class DisAMRScenarioGenerator:
 
     def calc_scenario_pl(self, path_data, fc=2.45, h_ut=5, los=False):
         # TODO: dummy until I get the fixed version
-        total = sum([1/np.sum(data['distances']) for data in path_data])*self.resolution
+        total = sum([np.sum(data['distances']) for data in path_data])*self.resolution
         # for data in path_data:    
         #     cumsum_d = np.cumsum(data['distances'])[None]
         #     urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
