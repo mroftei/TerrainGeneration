@@ -19,7 +19,7 @@ from math import inf, sqrt
 import pandas as pd
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
-MAGIC_CONSTANT = 1e3
+MAGIC_CONSTANT = 0
 
 
 class TerrainType(IntEnum):
@@ -42,10 +42,11 @@ class DisAMRScenarioGenerator:
     def __init__(
         self,
         n_receivers=1,
-        resolution=1024,
-        min_dist=50,
+        resolution=500,
+        min_dist=5,
         seed=42,
-        max_received_power=0.9,
+        meters_per_pixel=10,
+        max_received_power=-6700,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -53,10 +54,11 @@ class DisAMRScenarioGenerator:
         self.n_rx = n_receivers
         self.n_tx = 1
         self.resolution = resolution
-        self.min_dist = min_dist
+        self.min_dist = min_dist * meters_per_pixel
         self.rng = np.random.default_rng(seed=seed)
         self.fns = pyfastnoisesimd.Noise(seed=seed, numWorkers=1)
         self.fns.noiseType = pyfastnoisesimd.NoiseType.Simplex
+        self.mpp = meters_per_pixel
 
         self.RegenerateFullScenario(max_received_power)
 
@@ -150,7 +152,7 @@ class DisAMRScenarioGenerator:
         y += y_delta
 
         new_coord = np.array([x, y])
-        new_coord = np.clip(new_coord, 0, 1000)
+        new_coord = np.clip(new_coord, 0, self.resolution-1)
 
         return new_coord
 
@@ -162,7 +164,7 @@ class DisAMRScenarioGenerator:
         error=0.01,
         initial_magnitude=10,
         iteration_max=500,
-        save_metrics=False
+        save_metrics=True
     ):
         dist = cdist(transmitters, receivers, "euclidean").min()
         path_data = self._computeDistances(transmitters, receivers, self.map)
@@ -370,7 +372,7 @@ class DisAMRScenarioGenerator:
                 point_pairs = point_pairs[np.newaxis, ...]
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            )
+            ) * self.mpp
             new_path = {
                 "key_points": key_points,
                 "receiver_coords": receiver,
@@ -430,7 +432,7 @@ class DisAMRScenarioGenerator:
             )
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            )
+            ) * self.mpp
 
             new_path = {
                 "key_points": key_points,
@@ -560,26 +562,27 @@ class DisAMRScenarioGenerator:
         total = 0
         for pdata in path_data:
             # TODO: Confirm [-1] and fc, h_ut and los defaults
-            cumsum_d = np.cumsum(pdata["distances"])[-1]
-            urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
-            rural_pl = self.rural_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
-            extra_urban_pl = np.diff(urban_pl)
-            extra_rural_pl = np.diff(rural_pl)
+            cumsum_d = np.cumsum(pdata["distances"])
+            for d in cumsum_d:
+                # urban_pl = self.urban_path_loss(d, d, fc, h_ut, los).flatten()
+                rural_pl = self.rural_path_loss(d, d, fc, h_ut, los).flatten()
+                # extra_urban_pl = np.diff(urban_pl)
+                # extra_rural_pl = np.diff(rural_pl)
 
-            pl = urban_pl[0] if pdata["terrain_type"][0] > 0 else rural_pl[0]
-            for i in range(len(extra_urban_pl)):
-                if pdata["terrain_type"][i + 1] > 0:
-                    pl += extra_urban_pl[i]
-                else:
-                    pl += extra_rural_pl[i]
-            total += pl
+                # pl = urban_pl[0] if pdata["terrain_type"][0] > 0 else rural_pl[0]
+                pl = rural_pl[0]
+                # for i in range(len(extra_urban_pl)):
+                #     if pdata["terrain_type"][i + 1] > 0:
+                #         pl += extra_urban_pl[i]
+                #     else:
+                #         pl += extra_rural_pl[i]
+                total += pl
+            ...
 
-        # TODO: Confirm loss aggregation
         return total
 
     def calc_scenario_received_power(self, path_data):
-        # TODO: Confirm conversion to power
-        return MAGIC_CONSTANT / self.calc_scenario_pl(path_data)
+        return MAGIC_CONSTANT - self.calc_scenario_pl(path_data)
 
 
 if __name__ == "__main__":
