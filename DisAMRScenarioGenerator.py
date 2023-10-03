@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from itertools import product
 import matplotlib.patches as mpatches
@@ -15,9 +16,11 @@ import scipy.constants
 import numpy as np
 import matplotlib.pyplot as plt
 from math import inf, sqrt
+import pandas as pd
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
 MAGIC_CONSTANT = 1e3
+
 
 class TerrainType(IntEnum):
     Open = 1
@@ -34,8 +37,16 @@ class Direction(IntEnum):
     Towards = 5
     Away = 6
 
+
 class DisAMRScenarioGenerator:
-    def __init__(self, n_receivers=1, resolution=1024, min_dist=50, seed=42, max_received_power=0.9) -> None:
+    def __init__(
+        self,
+        n_receivers=1,
+        resolution=1024,
+        min_dist=50,
+        seed=42,
+        max_received_power=0.9,
+    ) -> None:
         self.map = []
         self.transmitters = []
         self.receivers = []
@@ -85,14 +96,16 @@ class DisAMRScenarioGenerator:
         self.map = self._resolveMap(pop_map, foliage_map)
 
         map_diagonal = np.sqrt(np.sum(np.power(self.map.shape, 2)))
-        
+
         if self.min_dist > map_diagonal:
             raise Exception("Invalid min distance and map size specified")
 
         self.transmitters, self.receivers = self.create_nodes(
             senders_in_city, self.map, self.resolution
         )
-        self.receivers = self.RegenerateReceivers(self.transmitters, self.receivers, max_received_power)
+        self.receivers = self.RegenerateReceivers(
+            self.transmitters, self.receivers, max_received_power
+        )
 
     def create_nodes(self, senders_in_city, map, map_resolution):
         if senders_in_city:
@@ -126,22 +139,31 @@ class DisAMRScenarioGenerator:
             x_target, y_target = to_coord
 
             eps = np.finfo(np.float32).eps
-            hyp_c = sqrt((y_target-y)**2+(x_target-x)**2)+eps
-            x_delta = magnitude*(x_target-x+eps)/hyp_c
-            y_delta = magnitude*(y_target-y+eps)/hyp_c
+            hyp_c = sqrt((y_target - y) ** 2 + (x_target - x) ** 2) + eps
+            x_delta = magnitude * (x_target - x + eps) / hyp_c
+            y_delta = magnitude * (y_target - y + eps) / hyp_c
             if direction == Direction.Away:
                 x_delta *= -1
                 y_delta *= -1
-        
+
         x += x_delta
         y += y_delta
-        
+
         new_coord = np.array([x, y])
         new_coord = np.clip(new_coord, 0, 1000)
 
         return new_coord
 
-    def RegenerateReceivers(self, transmitters, receivers, max_received_power):
+    def RegenerateReceivers(
+        self,
+        transmitters,
+        receivers,
+        max_received_power,
+        error=0.01,
+        initial_magnitude=10,
+        iteration_max=500,
+        save_metrics=False
+    ):
         dist = cdist(transmitters, receivers, "euclidean").min()
         path_data = self._computeDistances(transmitters, receivers, self.map)
         while dist < self.min_dist:
@@ -152,22 +174,45 @@ class DisAMRScenarioGenerator:
 
         power = self.calc_scenario_received_power(path_data)
         iteration_idx = 0
-        iteration_max = 500
-        error = 0.01
-        prereceivers = [p['receiver_coords'] for p in path_data]
+        reciever_lengths = []
         while abs(power - max_received_power) > error and iteration_idx < iteration_max:
+            magnitude = initial_magnitude * np.exp(-iteration_idx / iteration_max)
+            d = {}
+            d["magnitude"] = magnitude
+            d["error"] = abs(power - max_received_power)
             for i in range(len(path_data)):
-                sender, receiver = path_data[i]['sender_coords'], path_data[i]['receiver_coords']
+                sender, receiver = (
+                    path_data[i]["sender_coords"],
+                    path_data[i]["receiver_coords"],
+                )
                 power = self.calc_scenario_received_power(path_data)
-                direction = Direction.Away if power - max_received_power > 0 else Direction.Towards
-                receiver = self.move(receiver, direction, magnitude=5, to_coord=sender)
-                receiver_data = next(iter(self._computeDistances([sender], [receiver], self.map, path_aggregation=False)))
-                dist = sum(receiver_data['distances']).item()
+                diff = power - max_received_power
+                direction = (
+                    Direction.Away
+                    if diff > 0
+                    else Direction.Towards
+                )
+                receiver = self.move(
+                    receiver, direction, magnitude=magnitude, to_coord=sender
+                )
+                receiver_data = next(
+                    iter(
+                        self._computeDistances(
+                            [sender], [receiver], self.map, path_aggregation=False
+                        )
+                    )
+                )
+                dist = sum(receiver_data["distances"]).item()
+                d[f"receiver_{i}"] = sum(path_data[i]["distances"]).item()
+                d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
                 if dist > self.min_dist:
                     path_data[i] = receiver_data
-                
             power = self.calc_scenario_received_power(path_data)
-            receivers = [p['receiver_coords'] for p in path_data]
+            d["power"] = power
+            reciever_lengths.append(d)
+            if save_metrics:
+                pd.DataFrame.from_records(reciever_lengths).to_csv("test.csv")
+            receivers = [p["receiver_coords"] for p in path_data]
             iteration_idx += 1
         return receivers
 
@@ -336,7 +381,7 @@ class DisAMRScenarioGenerator:
             if not path_aggregation:
                 path_data.append(new_path)
                 continue
-            
+
             # Filter out pairs with small distances
             # TODO: Is this arbitrary?
             # maximum min segment possible without eliminating all segments
@@ -355,32 +400,34 @@ class DisAMRScenarioGenerator:
             new_point_pairs[0] = np.stack((sender, new_point_pairs[0][-1]))
             new_point_pairs[-1] = np.stack((new_point_pairs[-1][0], receiver))
             new_point_pairs = np.array(new_point_pairs)
-            
+
             # Connect pairs
             for pair_idx in range(len(new_point_pairs) - 1):
                 new_point_pairs[pair_idx, -1] = new_point_pairs[pair_idx + 1, 0]
-                
+
             # Further consolidate pairs based on terrain equivalence
             temp = []
             i = 0
             while i < len(new_point_pairs):
-                j = i+1
-                while j < len(new_point_pairs) and terrain_types[i]==terrain_types[j]:
+                j = i + 1
+                while j < len(new_point_pairs) and terrain_types[i] == terrain_types[j]:
                     j += 1
-                temp.append(np.stack((new_point_pairs[i][0], new_point_pairs[j-1][-1])))
+                temp.append(
+                    np.stack((new_point_pairs[i][0], new_point_pairs[j - 1][-1]))
+                )
                 i = j
             new_point_pairs = temp
-            
+
             # Extract key points
             key_points, ind = np.unique(
-                np.concatenate(new_point_pairs),
-                axis=0,
-                return_index=True
+                np.concatenate(new_point_pairs), axis=0, return_index=True
             )
             key_points = key_points[np.argsort(ind)]
-            
+
             # Recompute distances
-            point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze(axis=1)
+            point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze(
+                axis=1
+            )
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
             )
@@ -394,7 +441,7 @@ class DisAMRScenarioGenerator:
             }
             path_data.append(new_path)
         return path_data
-    
+
     def rural_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los):
         h_bs = 25
         average_building_height = 5.0
@@ -407,29 +454,41 @@ class DisAMRScenarioGenerator:
 
         # Beak point distance
         # For this computation, the carrifer frequency needs to be in Hz
-        distance_breakpoint = (2.*scipy.constants.pi*h_bs*h_ut*fc_ghz*1e9/scipy.constants.c)
+        distance_breakpoint = (
+            2.0 * scipy.constants.pi * h_bs * h_ut * fc_ghz * 1e9 / scipy.constants.c
+        )
 
         ## Basic path loss for LoS
         if distance_2d < distance_breakpoint:
-            pl_los = (20.0*np.log10(40.0*np.pi*distance_3d*fc_ghz/3.)
-                + np.min([0.03*np.power(average_building_height,1.72), 10.0])*np.log10(distance_3d)
-                - np.min([0.044*np.power(average_building_height,1.72), 14.77])
-                + 0.002*np.log10(average_building_height)*distance_3d)
+            pl_los = (
+                20.0 * np.log10(40.0 * np.pi * distance_3d * fc_ghz / 3.0)
+                + np.min([0.03 * np.power(average_building_height, 1.72), 10.0])
+                * np.log10(distance_3d)
+                - np.min([0.044 * np.power(average_building_height, 1.72), 14.77])
+                + 0.002 * np.log10(average_building_height) * distance_3d
+            )
         else:
-            pl_los = (20.0*np.log10(40.0*np.pi*distance_breakpoint*fc_ghz/3.)
-                + np.min([0.03*np.power(average_building_height,1.72), 10.0])*np.log10(distance_breakpoint)
-                - np.min([0.044*np.power(average_building_height,1.72), 14.77])
-                + 0.002*np.log10(average_building_height)*distance_breakpoint
-                + 40.0*np.log10(distance_3d/distance_breakpoint))
+            pl_los = (
+                20.0 * np.log10(40.0 * np.pi * distance_breakpoint * fc_ghz / 3.0)
+                + np.min([0.03 * np.power(average_building_height, 1.72), 10.0])
+                * np.log10(distance_breakpoint)
+                - np.min([0.044 * np.power(average_building_height, 1.72), 14.77])
+                + 0.002 * np.log10(average_building_height) * distance_breakpoint
+                + 40.0 * np.log10(distance_3d / distance_breakpoint)
+            )
 
         ## Basic pathloss for NLoS and O2I
         if not los:
-            pl_3 = (161.04 - 7.1*np.log10(average_street_width)
-                    + 7.5*np.log10(average_building_height)
-                    - (24.37 - 3.7*np.square(average_building_height/h_bs))*np.log10(h_bs)
-                    + (43.42 - 3.1*np.log10(h_bs))*(np.log10(distance_3d)-3.0)
-                    + 20.0*np.log10(fc_ghz) - (3.2*np.square(np.log10(11.75*h_ut))
-                    - 4.97))
+            pl_3 = (
+                161.04
+                - 7.1 * np.log10(average_street_width)
+                + 7.5 * np.log10(average_building_height)
+                - (24.37 - 3.7 * np.square(average_building_height / h_bs))
+                * np.log10(h_bs)
+                + (43.42 - 3.1 * np.log10(h_bs)) * (np.log10(distance_3d) - 3.0)
+                + 20.0 * np.log10(fc_ghz)
+                - (3.2 * np.square(np.log10(11.75 * h_ut)) - 4.97)
+            )
             pl_los = np.max([pl_los, pl_3])
 
         return pl_los
@@ -440,7 +499,7 @@ class DisAMRScenarioGenerator:
         # # LOS condition
         # if distance_2d < 18.0:
         #     los_probability = 1.0
-        # else: 
+        # else:
         #     c = 0 if h_ut < 13.0 else np.power((h_ut-13.)/10., 1.5)
         #     los_probability = ((18.0/distance_2d
         #         + np.exp(-distance_2d/63.0)*(1.-18./distance_2d))
@@ -449,36 +508,50 @@ class DisAMRScenarioGenerator:
         # los = np.random.binomial(1, los_probability) # Bernoulli Distribution
 
         # Beak point distance
-        g = ((5./4.)*np.power(distance_2d/100., 3.)
-            *np.exp(-distance_2d/150.0))
+        g = (
+            (5.0 / 4.0)
+            * np.power(distance_2d / 100.0, 3.0)
+            * np.exp(-distance_2d / 150.0)
+        )
         g = g if distance_2d >= 18.0 else 0.0
-        c = 0.0 if h_ut < 13.0 else g*np.power((h_ut-13.)/10., 1.5)
-        p = 1./(1.+c)
+        c = 0.0 if h_ut < 13.0 else g * np.power((h_ut - 13.0) / 10.0, 1.5)
+        p = 1.0 / (1.0 + c)
         r = np.random.uniform()
-        r = 1.0 if r<p else 0.0
+        r = 1.0 if r < p else 0.0
 
         max_value = h_ut - 1.5
         s = np.random.uniform(12, max_value)
         # It could happen that h_ut = 13m, and therefore max_value < 13m
-        s = s if s>=12.0 else 12.0
+        s = s if s >= 12.0 else 12.0
 
-        h_e = r + (1.-r)*s
+        h_e = r + (1.0 - r) * s
         h_bs_prime = h_bs - h_e
         h_ut_prime = h_ut - h_e
         # For this computation, the carrifer frequency needs to be in Hz
-        distance_breakpoint = 4*h_bs_prime*h_ut_prime*fc_ghz*1e9/scipy.constants.c
+        distance_breakpoint = (
+            4 * h_bs_prime * h_ut_prime * fc_ghz * 1e9 / scipy.constants.c
+        )
 
         ## Basic path loss for LoS
         if distance_2d < distance_breakpoint:
-            pl = 28.0 + 22.0*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
+            pl = 28.0 + 22.0 * np.log10(distance_3d) + 20.0 * np.log10(fc_ghz)
         else:
-            pl = (28.0 + 40.0*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
-                - 9.0*np.log10(np.square(distance_breakpoint)+np.square(h_bs-h_ut)))
+            pl = (
+                28.0
+                + 40.0 * np.log10(distance_3d)
+                + 20.0 * np.log10(fc_ghz)
+                - 9.0
+                * np.log10(np.square(distance_breakpoint) + np.square(h_bs - h_ut))
+            )
 
         ## Basic pathloss for NLoS
         if not los:
-            pl_3 = (13.54 + 39.08*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
-                - 0.6*(h_ut-1.5))
+            pl_3 = (
+                13.54
+                + 39.08 * np.log10(distance_3d)
+                + 20.0 * np.log10(fc_ghz)
+                - 0.6 * (h_ut - 1.5)
+            )
             pl = np.max([pl, pl_3])
 
         return pl
@@ -487,15 +560,15 @@ class DisAMRScenarioGenerator:
         total = 0
         for pdata in path_data:
             # TODO: Confirm [-1] and fc, h_ut and los defaults
-            cumsum_d = np.cumsum(pdata['distances'])[-1]
+            cumsum_d = np.cumsum(pdata["distances"])[-1]
             urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
             rural_pl = self.rural_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
             extra_urban_pl = np.diff(urban_pl)
             extra_rural_pl = np.diff(rural_pl)
 
-            pl = urban_pl[0] if pdata['terrain_type'][0] > 0 else rural_pl[0]
+            pl = urban_pl[0] if pdata["terrain_type"][0] > 0 else rural_pl[0]
             for i in range(len(extra_urban_pl)):
-                if pdata['terrain_type'][i+1] > 0:
+                if pdata["terrain_type"][i + 1] > 0:
                     pl += extra_urban_pl[i]
                 else:
                     pl += extra_rural_pl[i]
@@ -506,7 +579,7 @@ class DisAMRScenarioGenerator:
 
     def calc_scenario_received_power(self, path_data):
         # TODO: Confirm conversion to power
-        return MAGIC_CONSTANT/self.calc_scenario_pl(path_data)
+        return MAGIC_CONSTANT / self.calc_scenario_pl(path_data)
 
 
 if __name__ == "__main__":
