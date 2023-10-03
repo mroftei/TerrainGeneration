@@ -161,7 +161,6 @@ class DisAMRScenarioGenerator:
                 power = self.calc_scenario_received_power(path_data)
                 direction = Direction.Away if power - max_received_power > 0 else Direction.Towards
                 receiver = self.move(receiver, direction, magnitude=5, to_coord=sender)
-                # TODO: Ignore receivers that need to move too close
                 receiver_data = next(iter(self._computeDistances([sender], [receiver], self.map, path_aggregation=False)))
                 dist = sum(receiver_data['distances']).item()
                 if dist > self.min_dist:
@@ -486,7 +485,8 @@ class DisAMRScenarioGenerator:
 
     def calc_scenario_pl(self, path_data, fc=2.45, h_ut=5, los=False):
         total = 0
-        for pdata in path_data:    
+        for pdata in path_data:
+            # TODO: Confirm [-1] and fc, h_ut and los defaults
             cumsum_d = np.cumsum(pdata['distances'])[-1]
             urban_pl = self.urban_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
             rural_pl = self.rural_path_loss(cumsum_d, cumsum_d, fc, h_ut, los).flatten()
@@ -501,9 +501,11 @@ class DisAMRScenarioGenerator:
                     pl += extra_rural_pl[i]
             total += pl
 
+        # TODO: Confirm loss aggregation
         return total
 
     def calc_scenario_received_power(self, path_data):
+        # TODO: Confirm conversion to power
         return MAGIC_CONSTANT/self.calc_scenario_pl(path_data)
 
 
