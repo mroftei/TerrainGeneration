@@ -48,7 +48,7 @@ class DisAMRScenarioGenerator:
         min_path_distance=100,
         seed=42,
         meters_per_pixel=10,
-        max_received_power=-5550,
+        target_path_loss=98,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -63,11 +63,11 @@ class DisAMRScenarioGenerator:
         self.fns.noiseType = pyfastnoisesimd.NoiseType.Simplex
         self.mpp = meters_per_pixel
 
-        self.RegenerateFullScenario(max_received_power)
+        self.RegenerateFullScenario(target_path_loss)
 
     def RegenerateFullScenario(
         self,
-        max_received_power,
+        target_path_loss,
         foliage_freq=DEFAULT_MAP_CONFIG["foliage_freq"],
         foliage_octaves=DEFAULT_MAP_CONFIG["foliage_octaves"],
         foliage_octaves_factor=DEFAULT_MAP_CONFIG["foliage_octaves_factor"],
@@ -112,7 +112,7 @@ class DisAMRScenarioGenerator:
             senders_in_city, self.map, self.resolution
         )
         self.receivers = self.RegenerateReceivers(
-            self.transmitters, self.receivers, max_received_power
+            self.transmitters, self.receivers, target_path_loss
         )
 
     def create_nodes(self, senders_in_city, map, map_resolution):
@@ -177,7 +177,7 @@ class DisAMRScenarioGenerator:
         self,
         transmitters,
         receivers,
-        max_received_power,
+        max_path_loss,
         error=0.01,
         initial_magnitude=1,
         iteration_max=100,
@@ -187,26 +187,26 @@ class DisAMRScenarioGenerator:
         while dist < self.min_receiver_dist:
             receivers = np.random.randint(0, self.resolution, size=(self.n_rx, 2))
             dist = cdist(transmitters, receivers, "euclidean").min()
-        if max_received_power == inf:
+        if max_path_loss == inf:
             return receivers
 
         path_data = self._computeDistances(transmitters, receivers, self.map)
-        power = self.calc_scenario_received_power(path_data)
+        path_loss = self.calc_scenario_pl(path_data)
         iteration_idx = 0
         reciever_lengths = []
-        while abs(power - max_received_power) > error and iteration_idx < iteration_max:
+        while abs(path_loss - max_path_loss) > error and iteration_idx < iteration_max:
             magnitude = initial_magnitude * np.exp(-iteration_idx / iteration_max)
             d = {}
             d["magnitude"] = magnitude
-            d["error"] = abs(power - max_received_power)
+            d["error"] = abs(path_loss - max_path_loss)
             for i in range(len(path_data)):
                 sender, receiver = (
                     path_data[i]["sender_coords"],
                     path_data[i]["receiver_coords"],
                 )
-                power = self.calc_scenario_received_power(path_data)
-                diff = power - max_received_power
-                direction = Direction.Away if diff > 0 else Direction.Towards
+                path_loss = self.calc_scenario_pl(path_data)
+                diff = path_loss - max_path_loss
+                direction = Direction.Towards if diff > 0 else Direction.Away
                 receiver = self.move(
                     receiver, direction, magnitude=magnitude, relative_to_coord=sender
                 )
@@ -220,12 +220,12 @@ class DisAMRScenarioGenerator:
                         )
                     )
                 )
-                d[f"receiver_{i}"] = sum(path_data[i]["distances"]).item()
+                d[f"receiver_{i}"] = path_data[i]["distances"].sum().item()
                 d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
                 path_data[i] = receiver_data
 
-            power = self.calc_scenario_received_power(path_data)
-            d["power"] = power
+            path_loss = self.calc_scenario_pl(path_data)
+            d["path_loss"] = path_loss
             reciever_lengths.append(d)
             if save_metrics:
                 pd.DataFrame.from_records(reciever_lengths).to_csv("test.csv")
@@ -378,13 +378,14 @@ class DisAMRScenarioGenerator:
             terrain_types = map[ytrans_coords.astype(int), xtrans_coords.astype(int)][
                 :-1
             ]
+            terrain_types = np.array(terrain_types).T
             key_points = np.stack([xtrans_coords, ytrans_coords], axis=1)
             point_pairs = sliding_window_view(key_points, window_shape=(2, 2)).squeeze()
             if point_pairs.shape == (2, 2):
                 point_pairs = point_pairs[np.newaxis, ...]
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            )
+            ).T
             new_path = {
                 "key_points": key_points,
                 "receiver_coords": receiver,
@@ -445,8 +446,8 @@ class DisAMRScenarioGenerator:
             )
             distances = np.array(
                 [pdist(pair, metric=distance_metric) for pair in point_pairs]
-            )
-
+            ).T
+            terrain_types = np.array(terrain_types).T
             new_path = {
                 "key_points": key_points,
                 "receiver_coords": receiver,
@@ -460,146 +461,97 @@ class DisAMRScenarioGenerator:
             path_data.append(new_path)
         return path_data
 
-    def rural_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los):
+    def rural_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los=False):
         h_bs = 25
-        average_building_height = 5.0
-        average_street_width = 20
-
-        # LOS condition
-        # los_probability = np.exp(-(distance_2d-10.0)/1000.0)
-        # los_probability = np.where(distance_2d < 10.0, 1.0, los_probability)
-        # los = np.random.binomial(1, los_probability) # Bernoulli Distribution
+        average_building_height = 5.0 #5:50
+        average_street_width = 20 #5:50
 
         # Beak point distance
         # For this computation, the carrifer frequency needs to be in Hz
-        distance_breakpoint = (
-            2.0 * scipy.constants.pi * h_bs * h_ut * fc_ghz * 1e9 / scipy.constants.c
-        )
+        distance_breakpoint = (2.*scipy.constants.pi*h_bs*h_ut*fc_ghz*1e9/scipy.constants.c)
 
         ## Basic path loss for LoS
-        if distance_2d < distance_breakpoint:
-            pl_los = (
-                20.0 * np.log10(40.0 * np.pi * distance_3d * fc_ghz / 3.0)
-                + np.min([0.03 * np.power(average_building_height, 1.72), 10.0])
-                * np.log10(distance_3d)
-                - np.min([0.044 * np.power(average_building_height, 1.72), 14.77])
-                + 0.002 * np.log10(average_building_height) * distance_3d
-            )
-        else:
-            pl_los = (
-                20.0 * np.log10(40.0 * np.pi * distance_breakpoint * fc_ghz / 3.0)
-                + np.min([0.03 * np.power(average_building_height, 1.72), 10.0])
-                * np.log10(distance_breakpoint)
-                - np.min([0.044 * np.power(average_building_height, 1.72), 14.77])
-                + 0.002 * np.log10(average_building_height) * distance_breakpoint
-                + 40.0 * np.log10(distance_3d / distance_breakpoint)
-            )
-
-        ## Basic pathloss for NLoS and O2I
-        if not los:
-            pl_3 = (
-                161.04
-                - 7.1 * np.log10(average_street_width)
-                + 7.5 * np.log10(average_building_height)
-                - (24.37 - 3.7 * np.square(average_building_height / h_bs))
-                * np.log10(h_bs)
-                + (43.42 - 3.1 * np.log10(h_bs)) * (np.log10(distance_3d) - 3.0)
-                + 20.0 * np.log10(fc_ghz)
-                - (3.2 * np.square(np.log10(11.75 * h_ut)) - 4.97)
-            )
-            pl_los = np.max([pl_los, pl_3])
-
-        return pl_los
-
-    def urban_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los):
-        h_bs = 25
-
-        # # LOS condition
-        # if distance_2d < 18.0:
-        #     los_probability = 1.0
-        # else:
-        #     c = 0 if h_ut < 13.0 else np.power((h_ut-13.)/10., 1.5)
-        #     los_probability = ((18.0/distance_2d
-        #         + np.exp(-distance_2d/63.0)*(1.-18./distance_2d))
-        #         *(1.+c*5./4.*np.power(distance_2d/100., 3)
-        #             *np.exp(-distance_2d/150.0)))
-        # los = np.random.binomial(1, los_probability) # Bernoulli Distribution
-
-        # Beak point distance
-        g = (
-            (5.0 / 4.0)
-            * np.power(distance_2d / 100.0, 3.0)
-            * np.exp(-distance_2d / 150.0)
-        )
-        g = g if distance_2d >= 18.0 else 0.0
-        c = 0.0 if h_ut < 13.0 else g * np.power((h_ut - 13.0) / 10.0, 1.5)
-        p = 1.0 / (1.0 + c)
-        r = np.random.uniform()
-        r = 1.0 if r < p else 0.0
-
-        max_value = h_ut - 1.5
-        s = np.random.uniform(12, max_value)
-        # It could happen that h_ut = 13m, and therefore max_value < 13m
-        s = s if s >= 12.0 else 12.0
-
-        h_e = r + (1.0 - r) * s
-        h_bs_prime = h_bs - h_e
-        h_ut_prime = h_ut - h_e
-        # For this computation, the carrifer frequency needs to be in Hz
-        distance_breakpoint = (
-            4 * h_bs_prime * h_ut_prime * fc_ghz * 1e9 / scipy.constants.c
-        )
-
-        ## Basic path loss for LoS
-        if distance_2d < distance_breakpoint:
-            pl = 28.0 + 22.0 * np.log10(distance_3d) + 20.0 * np.log10(fc_ghz)
-        else:
-            pl = (
-                28.0
-                + 40.0 * np.log10(distance_3d)
-                + 20.0 * np.log10(fc_ghz)
-                - 9.0
-                * np.log10(np.square(distance_breakpoint) + np.square(h_bs - h_ut))
-            )
+        pl_short = (20.0*np.log10(40.0*np.pi*distance_3d*fc_ghz/3.)
+            + np.min([0.03*np.power(average_building_height,1.72), 10.0])*np.log10(distance_3d)
+            - np.min([0.044*np.power(average_building_height,1.72), 14.77])
+            + 0.002*np.log10(average_building_height)*distance_3d)
+        pl_long = (20.0*np.log10(40.0*np.pi*distance_breakpoint*fc_ghz/3.)
+            + np.min([0.03*np.power(average_building_height,1.72), 10.0])*np.log10(distance_breakpoint)
+            - np.min([0.044*np.power(average_building_height,1.72), 14.77])
+            + 0.002*np.log10(average_building_height)*distance_breakpoint
+            + 40.0*np.log10(distance_3d/distance_breakpoint))
+        pl = np.where(distance_2d < distance_breakpoint, pl_short, pl_long)
 
         ## Basic pathloss for NLoS
-        if not los:
-            pl_3 = (
-                13.54
-                + 39.08 * np.log10(distance_3d)
-                + 20.0 * np.log10(fc_ghz)
-                - 0.6 * (h_ut - 1.5)
-            )
-            pl = np.max([pl, pl_3])
+        pl_3 = (161.04 - 7.1*np.log10(average_street_width)
+                + 7.5*np.log10(average_building_height)
+                - (24.37 - 3.7*np.square(average_building_height/h_bs))*np.log10(h_bs)
+                + (43.42 - 3.1*np.log10(h_bs))*(np.log10(distance_3d)-3.0)
+                + 20.0*np.log10(fc_ghz) - (3.2*np.square(np.log10(11.75*h_ut))
+                - 4.97))
+        idx = np.logical_not(los)
+        pl = np.where(idx, np.max([pl, pl_3], 0), pl)
 
         return pl
 
-    def calc_scenario_pl(self, path_data, fc=2.45, h_ut=5, los=False):
-        total = 0
-        for pdata in path_data:
-            # TODO: Confirm [-1] and fc, h_ut and los defaults
-            distances = pdata["distances"]*self.mpp
-            cumsum_d = np.cumsum(distances)
-            for d in cumsum_d:
-                # urban_pl = self.urban_path_loss(d, d, fc, h_ut, los).flatten()
-                rural_pl = self.rural_path_loss(d, d, fc, h_ut, los).flatten()
-                # extra_urban_pl = np.diff(urban_pl)
-                # extra_rural_pl = np.diff(rural_pl)
+    def urban_path_loss(self, distance_2d, distance_3d, fc_ghz, h_ut, los=False):
+        h_bs = 25
+        
+        # Beak point distance
+        g = ((5./4.)*np.power(distance_2d/100., 3.)
+            *np.exp(-distance_2d/150.0))
+        g[distance_2d < 18.0] = 0.0
+        c = np.zeros_like(g)
+        c_idx = h_ut >= 13.0
+        if np.any(c_idx):
+            c[c_idx] = g[c_idx]*np.power((h_ut[c_idx]-13.)/10., 1.5)
+        p = 1./(1.+c)
+        r = np.random.uniform(size=distance_2d.shape)
+        r = np.where(r<p, 1.0, 0.0)
 
-                # pl = urban_pl[0] if pdata["terrain_type"][0] > 0 else rural_pl[0]
-                pl = rural_pl[0]
-                # for i in range(len(extra_urban_pl)):
-                #     if pdata["terrain_type"][i + 1] > 0:
-                #         pl += extra_urban_pl[i]
-                #     else:
-                #         pl += extra_rural_pl[i]
-                total += pl
-            ...
+        max_value = h_ut - 1.5
+        s = np.random.uniform(12, max_value, size=(len(distance_2d),1))
+        # It could happen that h_ut = 13m, and therefore max_value < 13m
+        s = np.clip(s, 12.0, None)
 
-        return total
+        h_e = r + (1.-r)*s
+        h_bs_prime = h_bs - h_e
+        h_ut_prime = h_ut - h_e
+        # For this computation, the carrifer frequency needs to be in Hz
+        distance_breakpoint = 4*h_bs_prime*h_ut_prime*fc_ghz*1e9/scipy.constants.c
 
-    def calc_scenario_received_power(self, path_data):
-        return -self.calc_scenario_pl(path_data)
+        ## Basic path loss for LoS
+        pl_short = 28.0 + 22.0*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
+        pl_long = (28.0 + 40.0*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
+            - 9.0*np.log10(np.square(distance_breakpoint)+np.square(h_bs-h_ut)))
+        pl = np.where(distance_2d < distance_breakpoint, pl_short, pl_long)
+
+        ## Basic pathloss for NLoS
+        pl_3 = (13.54 + 39.08*np.log10(distance_3d) + 20.0*np.log10(fc_ghz)
+            - 0.6*(h_ut-1.5))
+        idx = np.logical_not(los)
+        pl = np.where(idx, np.max([pl, pl_3], 0), pl)
+
+        return pl
+
+
+    def calc_scenario_pl(self, path_data, fc_ghz=0.92, h_ut=1.5, los=True):
+        total_pl = 0 
+        for pData in path_data:
+            cumsum_d = np.cumsum(pData["distances"], axis=-1)
+            urban_pl_dB = self.urban_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
+            rural_pl_dB = self.rural_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
+            urban_pl_lin = 10**(urban_pl_dB/10)
+            rural_pl_lin = 10**(rural_pl_dB/10)
+            extra_urban_pl = np.diff(urban_pl_lin)
+            extra_rural_pl = np.diff(rural_pl_lin)
+            #TODO: log math
+            
+            pl = np.where(pData["terrain_type"][...,0] > 0, urban_pl_lin[...,0], rural_pl_lin[...,0])
+            extra_pl = np.where(pData["terrain_type"][...,1:] > 0, extra_urban_pl, extra_rural_pl)
+            pl += np.sum(extra_pl, axis=-1)
+            total_pl += pl
+        return 10*np.log10(total_pl)
 
 
 if __name__ == "__main__":
