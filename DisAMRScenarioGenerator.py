@@ -17,16 +17,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from math import inf, sqrt
 import pandas as pd
+from copy import deepcopy
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
 MAGIC_CONSTANT = 0
 
 
 class TerrainType(IntEnum):
-    Open = 1
-    Foliage = 2
-    Suburban = 3
-    Urban = 4
+    Urban = 2
+    Rural = 1
 
 
 class Direction(IntEnum):
@@ -46,7 +45,7 @@ class DisAMRScenarioGenerator:
         n_receivers=1,
         resolution=500,
         min_receiver_dist=2000,
-        min_path_distance=500,
+        min_path_distance=100,
         seed=42,
         meters_per_pixel=10,
         max_received_power=-5550,
@@ -344,11 +343,8 @@ class DisAMRScenarioGenerator:
     def _resolveMap(self, pop_map, foliage_map):
         assert pop_map.shape == foliage_map.shape
         map = np.ones(pop_map.shape)
-        # map[pop_map == 0] = float(TerrainType.Open)  # Terrain
-        map[np.where(foliage_map > 0.7)] = float(TerrainType.Foliage)  # Foliage
-        # map[np.where((pop_map >= 0.8) & (foliage_map <= 0.5))] = float(TerrainType.Urban)  # Urban
-        map[np.where(pop_map >= 0.7)] = float(TerrainType.Suburban)
-        map[np.where(pop_map >= 0.9)] = float(TerrainType.Urban)
+        map[np.where(pop_map >= 0.5)] = float(TerrainType.Urban)
+        map[np.where(pop_map < 0.5)] = float(TerrainType.Rural)
         return map
 
     def _computeDistances(
