@@ -19,7 +19,6 @@ from math import inf, sqrt
 import pandas as pd
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
-MAGIC_CONSTANT = 0
 
 
 class TerrainType(IntEnum):
@@ -171,40 +170,43 @@ class DisAMRScenarioGenerator:
         new_coord = np.clip(new_coord, 0, self.resolution - 1)
 
         return new_coord
+    
+    def get_path_data(self):
+        return self._computeDistances(self.transmitters, self.receivers, self.map)
 
     def RegenerateReceivers(
         self,
         transmitters,
         receivers,
-        max_path_loss,
+        target_path_loss,
         error=0.01,
         initial_magnitude=1,
         iteration_max=100,
-        save_metrics=True,
+        save_metrics=False,
     ):
         dist = cdist(transmitters, receivers, "euclidean").min()
         while dist < self.min_receiver_dist:
             receivers = np.random.randint(0, self.resolution, size=(self.n_rx, 2))
             dist = cdist(transmitters, receivers, "euclidean").min()
-        if max_path_loss == inf:
+        if target_path_loss == inf:
             return receivers
 
         path_data = self._computeDistances(transmitters, receivers, self.map)
         path_loss = self.calc_scenario_pl(path_data)
         iteration_idx = 0
         reciever_lengths = []
-        while abs(path_loss - max_path_loss) > error and iteration_idx < iteration_max:
+        while abs(path_loss - target_path_loss) > error and iteration_idx < iteration_max:
             magnitude = initial_magnitude * np.exp(-iteration_idx / iteration_max)
             d = {}
             d["magnitude"] = magnitude
-            d["error"] = abs(path_loss - max_path_loss)
+            d["error"] = abs(path_loss - target_path_loss)
             for i in range(len(path_data)):
                 sender, receiver = (
                     path_data[i]["sender_coords"],
                     path_data[i]["receiver_coords"],
                 )
                 path_loss = self.calc_scenario_pl(path_data)
-                diff = path_loss - max_path_loss
+                diff = path_loss - target_path_loss
                 direction = Direction.Towards if diff > 0 else Direction.Away
                 receiver = self.move(
                     receiver, direction, magnitude=magnitude, relative_to_coord=sender
@@ -226,10 +228,12 @@ class DisAMRScenarioGenerator:
             path_loss = self.calc_scenario_pl(path_data)
             d["path_loss"] = path_loss
             reciever_lengths.append(d)
-            if save_metrics:
-                pd.DataFrame.from_records(reciever_lengths).to_csv("test.csv")
             receivers = [p["receiver_coords"] for p in path_data]
             iteration_idx += 1
+
+        if save_metrics:
+            pd.DataFrame.from_records(reciever_lengths).to_csv("regen_rx_placement.csv")
+
         return receivers
 
     def GetScenario(
@@ -391,6 +395,9 @@ class DisAMRScenarioGenerator:
                 "sender_coords": sender,
                 "terrain_type": terrain_types,
                 "distances": distances,
+                "distances_m": distances * self.mpp,
+                "receiver_coords_m": receiver * self.mpp,
+                "sender_coords_m": sender * self.mpp,
             }
             old_distances = distances.sum()
             if not path_aggregation:
@@ -453,6 +460,9 @@ class DisAMRScenarioGenerator:
                 "sender_coords": sender,
                 "terrain_type": terrain_types,
                 "distances": distances,
+                "distances_m": distances * self.mpp,
+                "receiver_coords_m": receiver * self.mpp,
+                "sender_coords_m": sender * self.mpp,
             }
             new_distances = distances.sum()
             if abs(old_distances-new_distances) > 0.01:
@@ -537,8 +547,7 @@ class DisAMRScenarioGenerator:
     def calc_scenario_pl(self, path_data, fc_ghz=0.92, h_ut=1.5, los=True):
         total_pl = 0 
         for pData in path_data:
-            distances = pData["distances"] * self.mpp
-            cumsum_d = np.cumsum(distances, axis=-1)
+            cumsum_d = np.cumsum(pData["distances"], axis=-1)
             urban_pl_dB = self.urban_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             rural_pl_dB = self.rural_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             urban_pl_lin = 10**(urban_pl_dB/10)
