@@ -46,7 +46,7 @@ class DisAMRScenarioGenerator:
         min_path_distance=100,
         seed=42,
         meters_per_pixel=10,
-        target_path_loss=138,
+        target_path_loss=135,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -206,6 +206,8 @@ class DisAMRScenarioGenerator:
                     path_data[i]["receiver_coords"],
                 )
                 path_loss = self.calc_scenario_pl(path_data)
+                d["path_loss"] = path_loss
+                
                 diff = path_loss - target_path_loss
                 direction = Direction.Towards if diff > 0 else Direction.Away
                 receiver = self.move(
@@ -213,6 +215,8 @@ class DisAMRScenarioGenerator:
                 )
                 dist = cdist([sender], [receiver], "euclidean").item()
                 if dist < self.min_receiver_dist:
+                    d[f"receiver_{i}"] = path_data[i]["distances"].sum().item()
+                    d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
                     continue
                 receiver_data = next(
                     iter(
@@ -224,9 +228,7 @@ class DisAMRScenarioGenerator:
                 d[f"receiver_{i}"] = path_data[i]["distances"].sum().item()
                 d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
                 path_data[i] = receiver_data
-
-            path_loss = self.calc_scenario_pl(path_data)
-            d["path_loss"] = path_loss
+            
             reciever_lengths.append(d)
             receivers = [p["receiver_coords"] for p in path_data]
             iteration_idx += 1
@@ -362,7 +364,7 @@ class DisAMRScenarioGenerator:
         for sender, receiver in product(senders, receivers):
             xSender, ySender = sender
             xReceiver, yReceiver = receiver
-            num = 10000
+            num = int(np.linalg.norm(map.shape)*10)
             # Evaluate points between sender and receiver
             x, y = np.linspace(xSender, xReceiver, num), np.linspace(
                 ySender, yReceiver, num
@@ -547,7 +549,7 @@ class DisAMRScenarioGenerator:
     def calc_scenario_pl(self, path_data, fc_ghz=0.92, h_ut=1.5, los=True):
         total_pl = 0 
         for pData in path_data:
-            cumsum_d = np.cumsum(pData["distances"], axis=-1)
+            cumsum_d = np.cumsum(pData["distances_m"], axis=-1)
             urban_pl_dB = self.urban_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             rural_pl_dB = self.rural_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             urban_pl_lin = 10**(urban_pl_dB/10)
