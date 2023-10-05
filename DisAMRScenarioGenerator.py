@@ -17,7 +17,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from math import inf, sqrt
 import pandas as pd
-from copy import deepcopy
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
 MAGIC_CONSTANT = 0
@@ -48,7 +47,7 @@ class DisAMRScenarioGenerator:
         min_path_distance=100,
         seed=42,
         meters_per_pixel=10,
-        target_path_loss=98,
+        target_path_loss=138,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -538,7 +537,8 @@ class DisAMRScenarioGenerator:
     def calc_scenario_pl(self, path_data, fc_ghz=0.92, h_ut=1.5, los=True):
         total_pl = 0 
         for pData in path_data:
-            cumsum_d = np.cumsum(pData["distances"], axis=-1)
+            distances = pData["distances"] * self.mpp
+            cumsum_d = np.cumsum(distances, axis=-1)
             urban_pl_dB = self.urban_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             rural_pl_dB = self.rural_path_loss(cumsum_d, cumsum_d, fc_ghz, h_ut, los)
             urban_pl_lin = 10**(urban_pl_dB/10)
