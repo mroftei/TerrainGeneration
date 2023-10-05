@@ -430,17 +430,21 @@ class DisAMRScenarioGenerator:
                 new_point_pairs[pair_idx, -1] = new_point_pairs[pair_idx + 1, 0]
 
             # Further consolidate pairs based on terrain equivalence
-            temp = []
+            point_pairsa_temp = []
+            terrain_temp = []
             i = 0
             while i < len(new_point_pairs):
                 j = i + 1
                 while j < len(new_point_pairs) and terrain_types[i] == terrain_types[j]:
                     j += 1
-                temp.append(
+                point_pairsa_temp.append(
                     np.stack((new_point_pairs[i][0], new_point_pairs[j - 1][-1]))
                 )
+                terrain_temp.append(terrain_types[j - 1])
                 i = j
-            new_point_pairs = temp
+                
+            new_point_pairs = np.stack(point_pairsa_temp)
+            terrain_types = np.stack(terrain_temp)
 
             # Extract key points
             key_points, ind = np.unique(
