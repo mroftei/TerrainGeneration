@@ -117,14 +117,14 @@ class DisAMRScenarioGenerator:
         if senders_in_city:
             city_points = np.stack(np.where(map == TerrainType.Urban)).T
             transmitters = city_points[
-                np.random.randint(len(city_points), size=(self.n_tx)), :
+                self.rng.integers(len(city_points), size=(self.n_tx)), :
             ]
             transmitters[:, [0, 1]] = transmitters[
                 :, [1, 0]
             ]  # Swap colums for consistency during unpack
         else:
-            transmitters = np.random.randint(map_resolution, size=(self.n_tx, 2))
-        receivers = np.random.randint(map_resolution, size=(self.n_rx, 2))
+            transmitters = self.rng.integers(map_resolution, size=(self.n_tx, 2))
+        receivers = self.rng.integers(map_resolution, size=(self.n_rx, 2))
 
         return transmitters, receivers
 
@@ -186,7 +186,7 @@ class DisAMRScenarioGenerator:
     ):
         dist = cdist(transmitters, receivers, "euclidean").min()
         while dist < self.min_receiver_dist:
-            receivers = np.random.randint(0, self.resolution, size=(self.n_rx, 2))
+            receivers = self.rng.integers(0, self.resolution, size=(self.n_rx, 2))
             dist = cdist(transmitters, receivers, "euclidean").min()
         if target_path_loss == inf:
             return receivers
@@ -517,13 +517,13 @@ class DisAMRScenarioGenerator:
         if np.any(c_idx):
             c[c_idx] = g[c_idx]*np.power((h_ut[c_idx]-13.)/10., 1.5)
         p = 1./(1.+c)
-        r = np.random.uniform(size=distance_2d.shape)
+        r = self.rng.uniform(size=distance_2d.shape)
         r = np.where(r<p, 1.0, 0.0)
 
         max_value = h_ut - 1.5
-        s = np.random.uniform(12, max_value, size=(len(distance_2d),1))
+        max_value = np.clip(max_value, 12.0, None)
+        s = self.rng.uniform(12, max_value, size=(len(distance_2d),1))
         # It could happen that h_ut = 13m, and therefore max_value < 13m
-        s = np.clip(s, 12.0, None)
 
         h_e = r + (1.-r)*s
         h_bs_prime = h_bs - h_e
