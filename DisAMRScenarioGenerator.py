@@ -17,6 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from math import inf, sqrt
 import pandas as pd
+from copy import deepcopy
 
 DEFAULT_MAP_CONFIG = json.load(open("default_map_config.json"))
 
@@ -27,12 +28,12 @@ class TerrainType(IntEnum):
 
 
 class Direction(IntEnum):
-    Up = 1
-    Down = 2
-    Left = 3
-    Right = 4
-    Towards = 5
-    Away = 6
+    Up = 2
+    Down = 3
+    Left = 4
+    Right = 5
+    Towards = 1
+    Away = -1
     Clockwise = 7
     CounterClockwise = 8
 
@@ -41,12 +42,12 @@ class DisAMRScenarioGenerator:
     def __init__(
         self,
         n_receivers=1,
-        resolution=500,
-        min_receiver_dist=2000,
-        min_path_distance=100,
+        resolution=1000,
+        min_receiver_dist=200,
+        min_path_distance=10,
         seed=42,
         meters_per_pixel=10,
-        target_path_loss=135,
+        target_path_loss=150,
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -167,9 +168,14 @@ class DisAMRScenarioGenerator:
         y += y_delta
 
         new_coord = np.array([x, y])
-        new_coord = np.clip(new_coord, 0, self.resolution - 1)
+        clipped_new_coord = np.clip(new_coord, 0, self.resolution - 1)
+        if (new_coord != clipped_new_coord).any():
+            clip = True
+            new_coord = clipped_new_coord
+        else:
+            clip = False
 
-        return new_coord
+        return new_coord, clip
     
     def get_path_data(self):
         return self._computeDistances(self.transmitters, self.receivers, self.map)
@@ -181,7 +187,7 @@ class DisAMRScenarioGenerator:
         target_path_loss,
         error=0.01,
         initial_magnitude=1,
-        iteration_max=100,
+        iteration_max=200,
         save_metrics=False,
     ):
         dist = cdist(transmitters, receivers, "euclidean").min()
@@ -195,29 +201,37 @@ class DisAMRScenarioGenerator:
         path_loss = self.calc_scenario_pl(path_data)
         iteration_idx = 0
         reciever_lengths = []
-        while abs(path_loss - target_path_loss) > error and iteration_idx < iteration_max:
-            magnitude = initial_magnitude * np.exp(-iteration_idx / iteration_max)
-            d = {}
-            d["magnitude"] = magnitude
-            d["error"] = abs(path_loss - target_path_loss)
-            for i in range(len(path_data)):
+        magnitude = initial_magnitude
+        init_sender = [0]*len(path_data)
+        init_receiver = [0]*len(path_data)
+        for i in range(len(path_data)):
+            init_sender[i], init_receiver[i] = (
+                path_data[i]["sender_coords"].copy(),
+                path_data[i]["receiver_coords"].copy(),
+            )            
+        
+        leap = 1.5
+        decay = 3
+        for i in range(len(path_data)):
+            magnitude = initial_magnitude
+            iteration_idx = 0
+            min_diff = inf
+            while abs(path_loss - target_path_loss) > error and iteration_idx < iteration_max:
                 sender, receiver = (
                     path_data[i]["sender_coords"],
                     path_data[i]["receiver_coords"],
                 )
                 path_loss = self.calc_scenario_pl(path_data)
-                d["path_loss"] = path_loss
-                
                 diff = path_loss - target_path_loss
                 direction = Direction.Towards if diff > 0 else Direction.Away
-                receiver = self.move(
-                    receiver, direction, magnitude=magnitude, relative_to_coord=sender
-                )
                 dist = cdist([sender], [receiver], "euclidean").item()
-                if dist < self.min_receiver_dist:
-                    d[f"receiver_{i}"] = path_data[i]["distances"].sum().item()
-                    d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
-                    continue
+                if direction == Direction.Towards:
+                    magnitude = np.clip(magnitude, 0, dist) + self.min_receiver_dist
+
+                # print(f"PRE MOVE: RECEIVER {i}, ITERATION {iteration_idx}, distance: {dist}, error: {diff}, magnitude: {magnitude}, path_loss: {path_loss}, Direction: {str(direction)}")
+                receiver, clip = self.move(
+                    init_receiver[i], direction, magnitude=magnitude, relative_to_coord=init_sender[i]
+                )
                 receiver_data = next(
                     iter(
                         self._computeDistances(
@@ -225,16 +239,36 @@ class DisAMRScenarioGenerator:
                         )
                     )
                 )
-                d[f"receiver_{i}"] = path_data[i]["distances"].sum().item()
-                d[f"direction_{i}"] = 1 if direction == Direction.Away else -1
-                path_data[i] = receiver_data
-            
-            reciever_lengths.append(d)
-            receivers = [p["receiver_coords"] for p in path_data]
-            iteration_idx += 1
+                tmp_path_data = deepcopy(path_data)
+                tmp_path_data[i] = receiver_data
+                path_loss = self.calc_scenario_pl(tmp_path_data)
+                final_diff = path_loss - target_path_loss
+                dist = cdist([sender], [receiver], "euclidean").item()
+                # print(f"POST MOVE: RECEIVER {i}, ITERATION {iteration_idx}, distance: {dist}, error: {final_diff}, magnitude: {magnitude}, path_loss: {path_loss}, Direction: {str(direction)}")
 
+                if abs(final_diff) < min_diff:
+                    optimal_path_data = deepcopy(tmp_path_data)
+                    min_diff = abs(final_diff)                
+                if np.abs(dist - self.min_receiver_dist) < 0.000001 or clip:
+                    break
+                if np.sign(final_diff)[0] == np.sign(diff)[0]:
+                    magnitude *= leap * np.exp(-iteration_idx/iteration_max)
+                    # If you need more magnitude, and moving away, and you clipped then stop
+                    if direction == Direction.Away and clip:
+                        break
+                    # If you need more magnitude, and moving towards, and you're already basically there then stop
+                    if direction == Direction.Towards and np.abs(dist - self.min_receiver_dist) < 0.000001:
+                        break
+                else:
+                    magnitude /= leap * np.exp(-decay*iteration_idx/iteration_max)
+                
+                iteration_idx += 1
+            path_data = deepcopy(optimal_path_data)
+        
         if save_metrics:
             pd.DataFrame.from_records(reciever_lengths).to_csv("regen_rx_placement.csv")
+
+        receivers = [p["receiver_coords"] for p in optimal_path_data]
 
         return receivers
 
@@ -570,7 +604,7 @@ class DisAMRScenarioGenerator:
 
 
 if __name__ == "__main__":
-    seed = 163250513
+    seed = 1052313
     np.random.seed(seed)
     random.seed(seed)
     print("Generating map")
