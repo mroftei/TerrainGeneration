@@ -62,13 +62,13 @@ class ScenarioGenerator:
     
     def _create_nodes(self):
         self.transmitters = self.rng.integers(self.resolution, size=(self.batch_size, self.n_tx, 3))
-        self.transmitters[:,-1] = self.h_tx
+        self.transmitters[...,-1] = self.h_tx
 
         # Regenerate receivers until all meet the minimum distance requirement
         self.receivers = self.rng.integers(self.resolution, size=(self.batch_size, self.n_rx, 3))
-        while torch.cdist(torch.from_numpy(self.transmitters).float(), torch.from_numpy(self.receivers).float(), 2).numpy().min() < self.min_receiver_dist: # torc.cdist
+        while torch.cdist(torch.from_numpy(self.transmitters[...,:2]).float(), torch.from_numpy(self.receivers[...,:2]).float(), 2).numpy().min() < self.min_receiver_dist: # torc.cdist
             self.receivers = self.rng.integers(0, self.resolution, size=(self.batch_size, self.n_rx, 3))
-        self.receivers[:,-1] = self.h_rx
+        self.receivers[...,-1] = self.h_rx
 
     def PlotMap(self, save_path=None):
         fig, axes = plt.subplots(nrows=1, figsize=(10, 10))
