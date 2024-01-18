@@ -1,5 +1,5 @@
 import matplotlib
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
@@ -20,8 +20,8 @@ class ScenarioGenerator:
         h_receivers = 10,
         h_transmitters = 1.5,
         resolution=500,
-        min_receiver_dist=2000,
-        min_path_distance=100,
+        min_receiver_dist=200,
+        min_path_distance=50,
         seed=42,
         n_workers=1
     ) -> None:
@@ -61,13 +61,13 @@ class ScenarioGenerator:
             return
     
     def _create_nodes(self):
-        self.transmitters = self.rng.integers(self.resolution, size=(self.batch_size, self.n_tx, 3))
+        self.transmitters = self.rng.integers(self.resolution, size=(self.batch_size, self.n_tx, 3)).astype(np.float32)
         self.transmitters[...,-1] = self.h_tx
 
         # Regenerate receivers until all meet the minimum distance requirement
-        self.receivers = self.rng.integers(self.resolution, size=(self.batch_size, self.n_rx, 3))
+        self.receivers = self.rng.integers(self.resolution, size=(self.batch_size, self.n_rx, 3)).astype(np.float32)
         while torch.cdist(torch.from_numpy(self.transmitters[...,:2]).float(), torch.from_numpy(self.receivers[...,:2]).float(), 2).numpy().min() < self.min_receiver_dist: # torc.cdist
-            self.receivers = self.rng.integers(0, self.resolution, size=(self.batch_size, self.n_rx, 3))
+            self.receivers = self.rng.integers(0, self.resolution, size=(self.batch_size, self.n_rx, 3)).astype(np.float32)
         self.receivers[...,-1] = self.h_rx
 
     def PlotMap(self, save_path=None):
@@ -79,7 +79,7 @@ class ScenarioGenerator:
             for i in range(self.n_rx):
                 axes.scatter(self.receivers[j, i,0], self.receivers[j, i,1], marker="o", color="g", s=50, zorder=10)
 
-            for i in self.n_tx:
+            for i in range(self.n_tx):
                 axes.scatter(self.transmitters[j, i, 0], self.transmitters[j, i, 1], marker="o", color="y", s=50, zorder=10)
 
         # key_points = d["key_points"]

@@ -8,9 +8,9 @@ DEFAULT_MAP_CONFIG = {
     "foliage_octaves_factor": 7.1,
     "foliage_levels": 10,
     "foliage_redistribution": 0.7,
-    "pop_octaves": 10,
-    "pop_freq": 0.001,
-    "pop_octaves_factor": 2.61,
+    "pop_octaves": 3,
+    "pop_freq": 0.0001,
+    "pop_octaves_factor": 5,
     "pop_levels": 11,
     "pop_redistribution": 4
 }
