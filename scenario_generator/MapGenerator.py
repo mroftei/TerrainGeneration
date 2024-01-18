@@ -1,5 +1,5 @@
 from enum import IntEnum
-import numpy as np
+import torch
 import pyfastnoisesimd
 
 DEFAULT_MAP_CONFIG = {
@@ -30,7 +30,9 @@ class MapGenerator():
                   island=True,
                   urban_threshold=0.5,
                   n_workers=1,
-                  seed=42) -> None:
+                  seed=42,
+                  dtype=torch.float32,
+                  device=None) -> None:
         self.width = width
         self.freq = freq
         self.octaves = octaves
@@ -43,34 +45,37 @@ class MapGenerator():
         self.fns = pyfastnoisesimd.Noise(seed=seed, numWorkers=n_workers)
         self.fns.noiseType = pyfastnoisesimd.NoiseType.Simplex
 
+        self.dtype = dtype
+        self.device = device
+
     def __call__(self):
         # Initialize map
-        z = np.zeros((self.width, self.width))
+        z = torch.zeros((self.width, self.width), dtype=self.dtype, device=self.device)
 
         # Apply noise maps with different frequencies
         of = 1
         for _ in range(self.octaves):
             self.fns.seed = self.fns.seed + 1
             self.fns.frequency = self.freq * of
-            z += (1 / of) * self.fns.genAsGrid([self.width, self.width])
+            z += (1 / of) * torch.from_numpy(self.fns.genAsGrid([self.width, self.width])).type(self.dtype).to(self.device)
             of *= self.octaves_factor
 
         # Enable population islands
-        znorm = (2 * (z - np.min(z)) / (np.max(z) - np.min(z))) - 1  # norm from -1 to 1
-        _b = np.linspace(-1, 1, self.width)
-        _x, _y = np.meshgrid(_b, _b)
+        znorm = (2 * (z - z.min()) / (z.max() - z.min())) - 1  # norm from -1 to 1
+        _b = torch.linspace(-1, 1, self.width, dtype=self.dtype, device=self.device)
+        _x, _y = torch.meshgrid(_b, _b, indexing='xy')
         d = -(1 - ((1 - _x**2) * (1 - _y**2)))
         if self.island:
             d *= -1
         z = (znorm + (1 - d)) / 2
 
         # Control diff between peaks and troughs
-        z = (z - np.min(z)) / (np.max(z) - np.min(z))  # norm from 0 to 1
-        z = np.power(z, self.redistribution)
+        z = (z - z.min()) / (z.max() - z.min())  # norm from 0 to 1
+        z = torch.pow(z, self.redistribution)
 
         # Quantize to specific terrain levels
-        z = np.digitize(z, np.linspace(z.min(), z.max() + 0.0000001, self.levels + 1))
-        z = (z - np.min(z)) / (np.max(z) - np.min(z))  # norm from 0 to 1
+        z = torch.bucketize(z, torch.linspace(z.min(), z.max() + 0.0000001, self.levels + 1, dtype=self.dtype, device=self.device))
+        z = (z - z.min()) / (z.max() - z.min())  # norm from 0 to 1
 
         # Resolve map to classes
-        return np.where(z >= self.urban_threshold, TerrainType.Urban, TerrainType.Rural)
+        return torch.where(z >= self.urban_threshold, TerrainType.Urban, TerrainType.Rural)
