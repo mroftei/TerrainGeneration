@@ -1,12 +1,10 @@
-import matplotlib
-# matplotlib.use("Agg")
+from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 
 import numpy as np
 import torch
-from scipy.spatial.distance import cdist
 
 from .MapGenerator import MapGenerator, TerrainType
 from .PathOptimizer import OptimizeReceivers
@@ -23,7 +21,9 @@ class ScenarioGenerator:
         min_receiver_dist=200,
         min_path_distance=50,
         seed=42,
-        n_workers=1
+        n_workers=1,
+        dtype=torch.float32,
+        device: Optional[torch.device] = None
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -37,8 +37,10 @@ class ScenarioGenerator:
         self.min_receiver_dist = min_receiver_dist
         self.min_path_distance = min_path_distance
         self.seed=seed
-        self.rng = np.random.default_rng(seed=seed)
-        self.map_gen = MapGenerator(resolution, n_workers=n_workers, seed=seed)
+        self.rng = torch.Generator(device=device).manual_seed(seed)
+        self.device = device
+        self._dtype = dtype
+        self.map_gen = MapGenerator(resolution, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         self.RegenerateFullScenario()
 
@@ -61,26 +63,26 @@ class ScenarioGenerator:
             return
     
     def _create_nodes(self):
-        self.transmitters = self.rng.integers(self.resolution, size=(self.batch_size, self.n_tx, 3)).astype(np.float32)
+        self.transmitters = torch.randint(self.resolution, size=(self.batch_size, self.n_tx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
         self.transmitters[...,-1] = self.h_tx
 
         # Regenerate receivers until all meet the minimum distance requirement
-        self.receivers = self.rng.integers(self.resolution, size=(self.batch_size, self.n_rx, 3)).astype(np.float32)
-        while torch.cdist(torch.from_numpy(self.transmitters[...,:2]).float(), torch.from_numpy(self.receivers[...,:2]).float(), 2).numpy().min() < self.min_receiver_dist: # torc.cdist
-            self.receivers = self.rng.integers(0, self.resolution, size=(self.batch_size, self.n_rx, 3)).astype(np.float32)
+        self.receivers = torch.randint(self.resolution, size=(self.batch_size, self.n_rx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
+        while torch.cdist(self.transmitters[...,:2], self.receivers[...,:2], 2).min() < self.min_receiver_dist:
+            self.receivers = torch.randint(self.resolution, size=(self.batch_size, self.n_rx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
         self.receivers[...,-1] = self.h_rx
 
     def PlotMap(self, save_path=None):
         fig, axes = plt.subplots(nrows=1, figsize=(10, 10))
-        im = axes.imshow(self.map, origin="lower", cmap="Blues")
-        values = np.unique(self.map.ravel())
+        im = axes.imshow(self.map.numpy(force=True), origin="lower", cmap="Blues")
+        values = torch.unique(self.map.ravel()).numpy(force=True)
 
         for j in range(self.batch_size):
             for i in range(self.n_rx):
-                axes.scatter(self.receivers[j, i,0], self.receivers[j, i,1], marker="o", color="g", s=50, zorder=10)
+                axes.scatter(self.receivers[j, i,0].numpy(force=True), self.receivers[j, i,1].numpy(force=True), marker="o", color="g", s=50, zorder=10)
 
             for i in range(self.n_tx):
-                axes.scatter(self.transmitters[j, i, 0], self.transmitters[j, i, 1], marker="o", color="y", s=50, zorder=10)
+                axes.scatter(self.transmitters[j, i, 0].numpy(force=True), self.transmitters[j, i, 1].numpy(force=True), marker="o", color="y", s=50, zorder=10)
 
         # key_points = d["key_points"]
         # xtrans_coords, ytrans_coords = key_points[:, 0], key_points[:, 1]
@@ -93,7 +95,7 @@ class ScenarioGenerator:
         patches = [
             mpatches.Patch(
                 color=colors[v_idx],
-                label=f"{str(TerrainType(v)).split('.')[-1]} Terrain",
+                label=f"{str(TerrainType(int(v))).split('.')[-1]} Terrain",
             )
             for v_idx, v in enumerate(values)
         ]
@@ -135,7 +137,6 @@ class ScenarioGenerator:
         return fig
 
 
-import numpy as np
 if __name__ == "__main__":
     seed = 46
 
