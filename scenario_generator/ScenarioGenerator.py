@@ -68,8 +68,12 @@ class ScenarioGenerator:
 
         # Regenerate receivers until all meet the minimum distance requirement
         self.receivers = torch.randint(self.resolution, size=(self.batch_size, self.n_rx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
-        while torch.cdist(self.transmitters[...,:2], self.receivers[...,:2], 2).min() < self.min_receiver_dist:
-            self.receivers = torch.randint(self.resolution, size=(self.batch_size, self.n_rx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
+        dist = torch.cdist(self.transmitters[...,:2], self.receivers[...,:2], 2)
+        while dist.min() < self.min_receiver_dist:
+            replace_idx = torch.any(dist < self.min_receiver_dist, dim=1)
+            new_receivers = torch.randint(self.resolution, size=(self.batch_size, self.n_rx, 3), generator=self.rng, dtype=self._dtype, device=self.device)
+            self.receivers[replace_idx] = new_receivers[replace_idx]
+            dist = torch.cdist(self.transmitters[...,:2], self.receivers[...,:2], 2)
         self.receivers[...,-1] = self.h_rx
 
     def PlotMap(self, save_path=None):
