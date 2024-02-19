@@ -5,6 +5,7 @@ from matplotlib.lines import Line2D
 
 import numpy as np
 import torch
+import itertools
 
 from .MapGenerator import MapGenerator, TerrainType
 from .PathOptimizer import OptimizeReceivers
@@ -88,9 +89,9 @@ class ScenarioGenerator:
             for i in range(self.n_tx):
                 axes.scatter(self.transmitters[j, i, 0].numpy(force=True), self.transmitters[j, i, 1].numpy(force=True), marker="o", color="y", s=50, zorder=10)
 
-        # key_points = d["key_points"]
-        # xtrans_coords, ytrans_coords = key_points[:, 0], key_points[:, 1]
-        # axes.plot(xtrans_coords[::-1], ytrans_coords[::-1], "rx-", zorder=0)
+            prop_paths = np.array(list(itertools.product(self.receivers[j,:,:2].numpy(force=True), self.transmitters[j,:,:2].numpy(force=True))))
+            xtrans_coords, ytrans_coords = prop_paths[..., 0].T, prop_paths[..., 1].T
+            axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0)
 
         axes.axis("image")
 
