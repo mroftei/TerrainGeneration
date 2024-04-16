@@ -160,7 +160,7 @@ def channelGainCalc(txLocations,
                     los_requested,
                     scenario):
     
-    scenario.update_topology(txLocations, rxLocations, scen_map, map_resolution=map_resolution, direction="uplink", los_requested=False)
+    scenario.update_topology(txLocations, rxLocations, scen_map, map_resolution=map_resolution, direction=direction, los_requested=los_requested)
     z, snr = scenario.generate_channels()
     
     return z, snr
@@ -172,14 +172,14 @@ kernal_size: filter size
 stride_Size: filter movement size
 """
 def avgFilter(SNRs, padding_Size, kernal_Size, stride_Size):
-
+    pad_op = torch.nn.ReflectionPad1d(padding_Size)
     average_Filter = torch.nn.AvgPool1d(kernel_size = kernal_Size,
-                                        padding = padding_Size,
+                                        padding = 0,
                                         stride = stride_Size, count_include_pad=False)
     
     filteredList = []
     for i in range(SNRs.shape[1]):
-        filteredList.append(average_Filter(SNRs[:,i,:].reshape(1,1,-1)))
+        filteredList.append(average_Filter(pad_op(SNRs[:,i,:].reshape(1,1,-1))))
     
     filtered_SNR = torch.cat(filteredList, axis=1).permute(2,1,0)
     

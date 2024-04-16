@@ -106,7 +106,7 @@ def OptimalSolution(scenario,
                     plotData = False,
                     debugMode = False):
     
-    mapBoundary = torch.tensor([[[0,0],[scen_map.shape[0],0],[scen_map.shape[0],scen_map.shape[1]],[0,scen_map.shape[1]]]]).to(device)
+    mapBoundary = torch.tensor([[[0,0],[scen_map.shape[0]-1,0],[scen_map.shape[0]-1,scen_map.shape[1]-1],[0,scen_map.shape[1]-1]]]).to(device)
     
     #1. Set the flag for not found optimal Rx location
     target_Found = False
