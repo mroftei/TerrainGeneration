@@ -158,11 +158,16 @@ def channelGainCalc(txLocations,
                     map_resolution,
                     direction,
                     los_requested,
-                    scenario):
+                    scenario,
+                    total_power = False):
     
     scenario.update_topology(txLocations, rxLocations, scen_map, map_resolution=map_resolution, direction=direction, los_requested=los_requested)
-    z, snr = scenario.generate_channels()
+    z, rx_pow_db = scenario.generate_channels()
     
+    if total_power:
+        rx_pow_db = 10*torch.log10(torch.sum(10**(rx_pow_db/10), 1))
+
+    snr = rx_pow_db - scenario.noise_power_db
     return z, snr
 
 """

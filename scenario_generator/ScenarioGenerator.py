@@ -30,7 +30,8 @@ class ScenarioGenerator:
         seed=42,
         n_workers=1,
         dtype=torch.float32,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        debug = False
     ) -> None:
         self.map = []
         self.transmitters = []
@@ -48,6 +49,7 @@ class ScenarioGenerator:
         self.rng = torch.Generator(device=device).manual_seed(seed)
         self.device = device
         self._dtype = dtype
+        self._debug = debug
         self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         # data type
@@ -87,7 +89,8 @@ class ScenarioGenerator:
                                                                                                         iteration_Controller = 10,
                                                                                                         padding_Size=5,
                                                                                                         errorPercentage = 0.5,
-                                                                                                        debugMode=True)
+                                                                                                        plotData=self._debug,
+                                                                                                        debugMode=self._debug)
             self.receivers = nearOptimalRxLoc
             return nearOptimalChannel_Z
         else:
