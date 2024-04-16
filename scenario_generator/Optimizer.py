@@ -6,6 +6,7 @@ Description:
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////"""
 from scenario_generator import OptimizerHelper
+import torch
 
 """
 This function is designed to run one time with all the parameters needed to find the 
@@ -88,29 +89,30 @@ for the receiver locations and the desired SNR values
 def OptimalSolution(scenario,
                     scen_map,
                     map_resolution,
-                    direction,
-                    los_requested,
-                    targetSNR,
                     txLoc,
                     rxLoc,
-                    minDistRequirement,
-                    maxOutPostDist,
-                    mapBoundary,
-                    resolution,
-                    padding_Size, 
-                    kernal_Size, 
-                    stride_Size,
-                    dev,
-                    iteration_Controller,
-                    errorPercentage,
-                    plotData,
-                    debugMode):
+                    direction="uplink",
+                    los_requested=False,
+                    targetSNR = 10.0,
+                    minDistRequirement = 10,
+                    maxOutPostDist = 100,
+                    batch_size = 128,
+                    padding_Size = 0, 
+                    kernal_Size = 27, 
+                    stride_Size= 1,
+                    device = None,
+                    iteration_Controller = 10,
+                    errorPercentage = 1.0,
+                    plotData = False,
+                    debugMode = False):
+    
+    mapBoundary = torch.tensor([[[0,0],[scen_map.shape[0],0],[scen_map.shape[0],scen_map.shape[1]],[0,scen_map.shape[1]]]]).to(device)
     
     #1. Set the flag for not found optimal Rx location
     target_Found = False
     
     #2. Replicate the Tx points to match the batch size
-    replicatedTxPoints = OptimizerHelper.replicatePoint(txLoc, resolution)
+    replicatedTxPoints = OptimizerHelper.replicatePoint(txLoc, batch_size)
     
     #3. call the runonce function which will do all the calculations and provide the first estimate for the near optimal Rx location and SNR
     channel_Z, filteredSNR, nearOptimalRxLoc = runOnce(scenario,
@@ -124,18 +126,18 @@ def OptimalSolution(scenario,
                                                         minDistRequirement,
                                                         maxOutPostDist,
                                                         mapBoundary,
-                                                        resolution,
+                                                        batch_size,
                                                         padding_Size, 
                                                         kernal_Size, 
                                                         stride_Size,
-                                                        dev,
+                                                        device,
                                                         plotData,
                                                         debugMode)
     
     iteration_val = 0
     
     #4. Now replicate the nearoptimal Rx
-    replicatedRxLoc = nearOptimalRxLoc.repeat((resolution,1,1))
+    replicatedRxLoc = nearOptimalRxLoc.repeat((batch_size,1,1))
     
     #5. start a while loop
     while(True):
@@ -171,8 +173,7 @@ def OptimalSolution(scenario,
             return target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs
         
         if iteration_val == iteration_Controller:
-            if debugMode: print("I am Unable to find the optimal solution, please retry with a new scenario set!!")
-            
-            return target_Found, None, None, None
+            # if debugMode: print("I am Unable to find the optimal solution, please retry with a new scenario set!!")
+            raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
         
         iteration_val += 1
