@@ -2,4 +2,5 @@ matplotlib
 scipy
 numpy
 pandas
+ortools
 https://github.com/robbmcleod/pyfastnoisesimd/archive/refs/tags/v0.4.3.zip

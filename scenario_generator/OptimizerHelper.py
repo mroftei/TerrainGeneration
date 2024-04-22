@@ -8,6 +8,8 @@ Description:
 from __future__ import division 
 import torch
 import matplotlib.pyplot as plt
+import numpy as np
+from ortools.graph.python import linear_sum_assignment
 
 """
 txLoc: Transmittor location (x,y,h_ut)
@@ -272,5 +274,43 @@ tensor2
 This function takes two tensor of same shape and finds the l2 distance between them
 """
 def distanceCalc(tensor1,tensor2):
-    totalDistance = torch.cdist(tensor1, tensor2, p=2)
+    totalDistance = torch.cdist(tensor1[:,:,0:2], tensor2[:,:,0:2], p=2)
     return totalDistance.squeeze(1)
+
+"""
+This function takes in a tensor and returns the min and max values
+"""
+def getMinMaxTensor(givenTensor):
+    minTensor = givenTensor.min(dim=0, keepdim = True)[0]
+    maxTensor = givenTensor.max(dim=0, keepdim = True)[0]
+    return minTensor, maxTensor
+
+"""
+minSNRTensor: a tensor containing the minimum values
+maxSNRTensor: a tensor containing the maximum values
+targetSNR: a tensor containing the target SNR values to be assigned to Rx
+This function uses the linear assignment algorithm to determine which Receivers is able to achieve the given SNR values
+"""
+def assignSNRtoRx(minSNRTensor, maxSNRTensor, targetSNRs, dev):
+
+    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
+    targetSNRs = torch.tensor(targetSNRs, device=dev).reshape(1,len(targetSNRs),1)
+    meanSNRs = (maxSNRTensor + minSNRTensor) / 2.0
+    distance_Vector = torch.abs(targetSNRs - meanSNRs.transpose(0, 1)).squeeze().transpose(0, 1).to('cpu').numpy()
+    RxNodes_set, SNR_Nodes_set = np.meshgrid(np.arange(distance_Vector.shape[1]), np.arange(distance_Vector.shape[0]))
+
+    SNR_nodes = SNR_Nodes_set.ravel()
+    Rx_nodes = RxNodes_set.ravel()
+    arc_costs = distance_Vector.ravel()
+
+    Assign_SNRtoRx = linear_sum_assignment.SimpleLinearSumAssignment()
+    Assign_SNRtoRx.add_arcs_with_cost(SNR_nodes, Rx_nodes, arc_costs)
+    status = Assign_SNRtoRx.solve()
+
+    if status == Assign_SNRtoRx.OPTIMAL:
+        for i in range(0, Assign_SNRtoRx.num_nodes()):
+            newSNRTensor[:,Assign_SNRtoRx.right_mate(i)] = targetSNRs[:,i]
+    else:
+        raise Exception("Unable to assign SNRs to Rx Nodes")
+
+    return newSNRTensor

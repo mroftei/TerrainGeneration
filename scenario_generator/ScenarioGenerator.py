@@ -29,6 +29,9 @@ class ScenarioGenerator:
         noise_power_dB = None,
         seed=42,
         n_workers=1,
+        max_iter=4,
+        optimizer_iter_ctr = 10,
+        optimizer_error_pct = 0.5,
         dtype=torch.float32,
         device: Optional[torch.device] = None,
         debug = False
@@ -50,6 +53,9 @@ class ScenarioGenerator:
         self.device = device
         self._dtype = dtype
         self._debug = debug
+        self.max_iter = max_iter
+        self.optimizer_iter_ctr = optimizer_iter_ctr
+        self.optimizer_error_pct = optimizer_error_pct
         self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         # data type
@@ -74,7 +80,9 @@ class ScenarioGenerator:
 
         if target_snr is not None:
             target_Found = False
+            iter_control = 0
             while(not target_Found):
+                iter_control += 1
                 target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs = OptimalSolution(scenario = self.sionna,
                                                                                                         scen_map = self.map,
                                                                                                         map_resolution=self.map_resolution,
@@ -86,11 +94,18 @@ class ScenarioGenerator:
                                                                                                         maxOutPostDist = self.map_size,
                                                                                                         batch_size = self.batch_size,
                                                                                                         device = self.device,
-                                                                                                        iteration_Controller = 10,
-                                                                                                        padding_Size=5,
-                                                                                                        errorPercentage = 0.5,
+                                                                                                        iteration_Controller = self.optimizer_iter_ctr,
+                                                                                                        padding_Size = 4,
+                                                                                                        errorPercentage = self.optimizer_error_pct,
                                                                                                         plotData=self._debug,
                                                                                                         debugMode=self._debug)
+                if not target_Found:
+                    # Regenerate new points and send it to the optimizer
+                    self._create_nodes()
+                
+                if self.max_iter == iter_control:
+                    raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
+
             self.receivers = nearOptimalRxLoc
             return nearOptimalChannel_Z
         else:

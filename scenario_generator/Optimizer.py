@@ -75,12 +75,21 @@ def runOnce(scenario,
     if plotData:
         OptimizerHelper.plotSNRvsDist(filteredSNR,clippedDist,SNRs,completeDist)
     
-    #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
-    # use the index for finding the near Optimal Rx location
-    smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
-    nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
+    if len(targetSNR) == 1:
+        #Here the SNR maybe a single variable
+        #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
+        # use the index for finding the near Optimal Rx location
+        smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR[0])
+        nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
 
-    return channel_Z, filteredSNR, nearOptimalRxLoc
+    else:
+        #14. Here the SNR maybe a list
+        minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
+        targetSNR = OptimizerHelper.assignSNRtoRx(minTensor, maxTensor, targetSNR, dev)
+        smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
+        nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
+
+    return channel_Z, filteredSNR, nearOptimalRxLoc, targetSNR
 
 """
 The Main Optimizer function which is responsible for finding the near optimal solution
@@ -98,7 +107,7 @@ def OptimalSolution(scenario,
                     maxOutPostDist = 100,
                     batch_size = 128,
                     padding_Size = 0, 
-                    kernal_Size = 27, 
+                    kernal_Size = 28, 
                     stride_Size= 1,
                     device = None,
                     iteration_Controller = 10,
@@ -106,6 +115,9 @@ def OptimalSolution(scenario,
                     plotData = False,
                     debugMode = False):
     
+    assert isinstance(targetSNR, list), "targetSNR must be a list"
+    assert rxLoc.shape[1] == len(targetSNR) or len(targetSNR) == 1, "Number of TargetSNR must be either 1 or number of receivers sent"
+
     mapBoundary = torch.tensor([[[0,0],[scen_map.shape[0]-1,0],[scen_map.shape[0]-1,scen_map.shape[1]-1],[0,scen_map.shape[1]-1]]]).to(device)
     
     #1. Set the flag for not found optimal Rx location
@@ -115,24 +127,24 @@ def OptimalSolution(scenario,
     replicatedTxPoints = OptimizerHelper.replicatePoint(txLoc, batch_size)
     
     #3. call the runonce function which will do all the calculations and provide the first estimate for the near optimal Rx location and SNR
-    channel_Z, filteredSNR, nearOptimalRxLoc = runOnce(scenario,
-                                                        scen_map,
-                                                        map_resolution,
-                                                        direction,
-                                                        los_requested,
-                                                        targetSNR,
-                                                        txLoc,
-                                                        rxLoc,
-                                                        minDistRequirement,
-                                                        maxOutPostDist,
-                                                        mapBoundary,
-                                                        batch_size,
-                                                        padding_Size, 
-                                                        kernal_Size, 
-                                                        stride_Size,
-                                                        device,
-                                                        plotData,
-                                                        debugMode)
+    channel_Z, filteredSNR, nearOptimalRxLoc, targetSNR = runOnce(scenario,
+                                                                scen_map,
+                                                                map_resolution,
+                                                                direction,
+                                                                los_requested,
+                                                                targetSNR,
+                                                                txLoc,
+                                                                rxLoc,
+                                                                minDistRequirement,
+                                                                maxOutPostDist,
+                                                                mapBoundary,
+                                                                batch_size,
+                                                                padding_Size, 
+                                                                kernal_Size, 
+                                                                stride_Size,
+                                                                device,
+                                                                plotData,
+                                                                debugMode)
     
     iteration_val = 0
     
@@ -154,7 +166,10 @@ def OptimalSolution(scenario,
         SNRs = SNRs.squeeze(-1,-2)
         
         #8. Find the index of the closest value of the SNR to the targetSNR
-        smallest_value, index = OptimizerHelper.findMinSNRVal(SNRs,targetSNR)
+        if len(targetSNR) == 1:
+            smallest_value, index = OptimizerHelper.findMinSNRVal(SNRs,targetSNR[0])
+        else:
+            smallest_value, index = OptimizerHelper.findMinSNRVal(SNRs,targetSNR)
         
         #9. Use the index to determine the optimal SNR values
         nearOptimalSNRs = OptimizerHelper.getMinIndexVal(index, SNRs)
@@ -174,6 +189,7 @@ def OptimalSolution(scenario,
         
         if iteration_val == iteration_Controller:
             # if debugMode: print("I am Unable to find the optimal solution, please retry with a new scenario set!!")
-            raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
+            #raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
+            return target_Found, None, None, None
         
         iteration_val += 1
