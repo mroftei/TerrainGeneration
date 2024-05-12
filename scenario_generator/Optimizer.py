@@ -18,6 +18,7 @@ def runOnce(scenario,
             direction,
             los_requested,
             targetSNR,
+            replicateSNR,
             txLoc,
             rxLoc,
             minDistRequirement,
@@ -76,15 +77,28 @@ def runOnce(scenario,
         OptimizerHelper.plotSNRvsDist(filteredSNR,clippedDist,SNRs,completeDist)
     
     if len(targetSNR) == 1:
-        #Here the SNR maybe a single variable
-        #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
-        # use the index for finding the near Optimal Rx location
-        smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR[0])
-        nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
-
+        #The new check flag tells us whether we want to replicate the SNR across the RxTower or distribute it
+        if replicateSNR:
+            #Here the SNR maybe a single variable
+            #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
+            # use the index for finding the near Optimal Rx location
+            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR[0])
+            nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
+        else:
+            #Here the SNR maybe a single variable, However, we try to solve for total SNR and distribute it across the Rx Towers
+            #14. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
+            # use the index for finding the near Optimal Rx location
+            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
+            if targetSNR[0] > torch.sum(maxTensor).to('cpu').tolist() or targetSNR[0] < torch.sum(minTensor).to('cpu').tolist():
+                raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
+            targetSNR = OptimizerHelper.distributeSNRtoRx(minTensor, maxTensor, targetSNR, minTensor.shape[1], dev)
+            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
+            nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
     else:
-        #14. Here the SNR maybe a list
+        #15. Here the SNR maybe a list
         minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
+        if sum(targetSNR) > torch.sum(maxTensor).to('cpu').tolist() or sum(targetSNR) < torch.sum(minTensor).to('cpu').tolist():
+            raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
         targetSNR = OptimizerHelper.assignSNRtoRx(minTensor, maxTensor, targetSNR, dev)
         smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
         nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
@@ -103,6 +117,7 @@ def OptimalSolution(scenario,
                     direction="uplink",
                     los_requested=False,
                     targetSNR = 10.0,
+                    replicateSNR = False,
                     minDistRequirement = 10,
                     maxOutPostDist = 100,
                     batch_size = 128,
@@ -133,6 +148,7 @@ def OptimalSolution(scenario,
                                                                 direction,
                                                                 los_requested,
                                                                 targetSNR,
+                                                                replicateSNR,
                                                                 txLoc,
                                                                 rxLoc,
                                                                 minDistRequirement,

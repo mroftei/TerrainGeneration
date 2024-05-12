@@ -10,6 +10,8 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from ortools.graph.python import linear_sum_assignment
+from ortools.linear_solver import pywraplp
+from scipy.optimize import minimize
 
 """
 txLoc: Transmittor location (x,y,h_ut)
@@ -239,7 +241,7 @@ def plotSNRvsDist(filteredSNR,dist1,unfilteredSNR,dist2):
         
         plt.plot(d_unclipped,unfSNRindividual)
         plt.plot(d_clipped,fSNRindividual)
-        
+        plt.savefig(f"plt1_{i}.jpg")
         plt.show()
     
 """
@@ -314,3 +316,101 @@ def assignSNRtoRx(minSNRTensor, maxSNRTensor, targetSNRs, dev):
         raise Exception("Unable to assign SNRs to Rx Nodes")
 
     return newSNRTensor
+
+"""
+minSNRTensor: a tensor containing the minimum values
+maxSNRTensor: a tensor containing the maximum values
+targetSNR: a tensor containing the target SNR values to be assigned to Rx
+numOfRxTowers: Number of receivers
+dev: Device on which the tensors are located
+This function is LP solver, it tries to satisfy the constraints provided. It does not have an actual optimization equation to solve, 
+hence, its job is to just meet the requirements of constraints and provide an output.
+"""
+def GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+
+    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
+    LPSolver = pywraplp.Solver.CreateSolver("GLOP")
+
+    #Enable it to solve problems in two directions i.e., the dual of the problem
+    LPSolver.SetSolverSpecificParametersAsString("use_dual_simplex:true")
+    
+    variables = []
+    for i in range(numOfRxTowers):
+        var = LPSolver.NumVar(-1 * (LPSolver.infinity()), LPSolver.infinity(), f'x{i+1}')
+        variables.append(var)
+        LPSolver.Add(var >= float(minSNRTensor[:,i,0].to('cpu').numpy()[0]))
+        LPSolver.Add(var <= float(maxSNRTensor[:,i,0].to('cpu').numpy()[0]))
+
+    #Add constraint that the sum of variables must be equal to the target SNR, hence the lower and upper bound is target value
+    constraint = LPSolver.Constraint(targetSNR[0], targetSNR[0])
+    for var in variables:
+        constraint.SetCoefficient(var, 1)
+
+    #Here we do not specify an objective function, however every solver does need something, hence we pass a dummy objective here
+    objective = LPSolver.Objective()
+    for var in variables:
+        objective.SetCoefficient(var, 0)
+    objective.SetMinimization()
+     
+    # Solve the problem
+    status = LPSolver.Solve()
+
+    if status == LPSolver.OPTIMAL:
+        for i, var in enumerate(variables):
+            newSNRTensor[:,i] = var.solution_value()
+        return newSNRTensor
+    return None
+
+"""
+minSNRTensor: a tensor containing the minimum values
+maxSNRTensor: a tensor containing the maximum values
+targetSNR: a tensor containing the target SNR values to be assigned to Rx
+numOfRxTowers: Number of receivers
+dev: Device on which the tensors are located
+This function does solves a quadratic equation i.e., a least square estimation technique.
+We provide an inital guess and here for simplicity, we use the average of the Minimum and Maximum SNR achievable by the Rx Towers.
+We also use the Min and Max SNR as constraints, to ensure we stay within the limit of SNR achievable
+"""
+def ObjectiveFunction(individualParamaters_list, targetSum):
+    return (sum(individualParamaters_list) - targetSum)**2
+
+def PowellSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+    
+    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
+    minSNRTensorFlattened = minSNRTensor.flatten().to('cpu').numpy()
+    maxSNRTensorFlattened = maxSNRTensor.flatten().to('cpu').numpy()
+
+    constraints_Bounds = list(zip(minSNRTensorFlattened, maxSNRTensorFlattened))
+    
+    Initial_Guess = [(np.mean(pair) * -1.0) for pair in constraints_Bounds]
+    OptimalSolutionResult = minimize(ObjectiveFunction, Initial_Guess, args=(targetSNR[0],), method='Powell', bounds=constraints_Bounds)
+    
+    if OptimalSolutionResult.success:
+        if OptimalSolutionResult.fun < 1e-5:            
+            for i, x in enumerate(OptimalSolutionResult.x):
+                newSNRTensor[:,i] = x
+            return newSNRTensor
+    return None
+
+"""
+minSNRTensor: a tensor containing the minimum values
+maxSNRTensor: a tensor containing the maximum values
+targetSNR: a tensor containing the target SNR values to be assigned to Rx
+numOfRxTowers: Number of receivers
+dev: Device on which the tensors are located
+
+To provide redundancy, as there cases when one of the solvers may not converge. In those cases, the function calls
+another optimizer. Here we have the GLOPsolver i.e., the LP solver and the Powell Solver which is quadratic solver.
+If neither of them achieve the goal, an exception is raised.
+"""
+def distributeSNRtoRx(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+    
+    snrTensor = GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev)
+    if snrTensor is not None:
+        return snrTensor
+    
+    snrTensor = PowellSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev)
+    if snrTensor is not None:
+        return snrTensor
+    else:
+        raise Exception("Optimization failed, neither of the solvers are able to converge")

@@ -29,9 +29,10 @@ class ScenarioGenerator:
         noise_power_dB = None,
         seed=42,
         n_workers=1,
-        max_iter=4,
+        max_iter=5,
         optimizer_iter_ctr = 10,
         optimizer_error_pct = 0.5,
+        replicateSNR = True,
         dtype=torch.float32,
         device: Optional[torch.device] = None,
         debug = False
@@ -54,6 +55,7 @@ class ScenarioGenerator:
         self._dtype = dtype
         self._debug = debug
         self.max_iter = max_iter
+        self.replicateSNR = replicateSNR
         self.optimizer_iter_ctr = optimizer_iter_ctr
         self.optimizer_error_pct = optimizer_error_pct
         self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
@@ -75,9 +77,9 @@ class ScenarioGenerator:
             raise Exception("Invalid min path distance and map size specified")
         
         self.map = self.map_gen() #Sample map generator
-
+        
         self._create_nodes()
-
+        
         if target_snr is not None:
             target_Found = False
             iter_control = 0
@@ -88,6 +90,7 @@ class ScenarioGenerator:
                                                                                                         map_resolution=self.map_resolution,
                                                                                                         los_requested=False,
                                                                                                         targetSNR = target_snr,
+                                                                                                        replicateSNR=self.replicateSNR,
                                                                                                         txLoc = self.transmitters,
                                                                                                         rxLoc = self.receivers,
                                                                                                         minDistRequirement = self.min_receiver_dist,
@@ -97,13 +100,13 @@ class ScenarioGenerator:
                                                                                                         iteration_Controller = self.optimizer_iter_ctr,
                                                                                                         padding_Size = 4,
                                                                                                         errorPercentage = self.optimizer_error_pct,
-                                                                                                        plotData=self._debug,
+                                                                                                        plotData=False,
                                                                                                         debugMode=self._debug)
                 if not target_Found:
                     # Regenerate new points and send it to the optimizer
                     self._create_nodes()
                 
-                if self.max_iter == iter_control:
+                if self.max_iter < iter_control:
                     raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
 
             self.receivers = nearOptimalRxLoc
