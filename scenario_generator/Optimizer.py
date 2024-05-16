@@ -82,6 +82,9 @@ def runOnce(scenario,
             #Here the SNR maybe a single variable
             #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
             # use the index for finding the near Optimal Rx location
+            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
+            if targetSNR[0] > torch.min(maxTensor).to('cpu').tolist() or targetSNR[0] < torch.max(minTensor).to('cpu').tolist():
+                raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
             smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR[0])
             nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
         else:
