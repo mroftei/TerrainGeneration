@@ -3,5 +3,6 @@ scipy
 numpy
 pandas
 ortools
+matplotlib-label-lines
 https://github.com/robbmcleod/pyfastnoisesimd/archive/refs/tags/v0.4.3.zip
 git+https://github.com/mroftei/SionnaTorch.git@v0.2.3

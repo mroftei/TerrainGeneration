@@ -2,6 +2,7 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
+import labellines
 
 import numpy as np
 import torch
@@ -45,6 +46,7 @@ class ScenarioGenerator:
         self.batch_size = batch_size
         self.h_tx = h_transmitters
         self.h_rx = h_receivers
+        self.generatedSNRs = []
         self.map_size = map_size
         self.map_resolution = map_resolution
         self.min_receiver_dist = min_receiver_dist
@@ -110,6 +112,7 @@ class ScenarioGenerator:
                     raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
 
             self.receivers = nearOptimalRxLoc
+            self.generatedSNRs = nearOptimalSNRs
             return nearOptimalChannel_Z
         else:
             return
@@ -128,8 +131,9 @@ class ScenarioGenerator:
             dist = torch.cdist(self.transmitters[...,:2], self.receivers[...,:2], 2)
         self.receivers[...,-1] = self.h_rx
 
-    def PlotMap(self, save_path=None):
-        fig, axes = plt.subplots(nrows=1, figsize=(4, 4))
+    def PlotMap(self, SNRs=None, save_path=None):
+        SRNs = [str(round(a, 1)) for a in SNRs]
+        fig, axes = plt.subplots(nrows=1, figsize=(5, 5))
         extent = (0, self.map_size*self.map_resolution, 0, self.map_size*self.map_resolution)
         im = axes.imshow(self.map.numpy(force=True), extent=extent, origin="lower", cmap="Blues")
         values = torch.unique(self.map.ravel()).numpy(force=True)
@@ -147,7 +151,11 @@ class ScenarioGenerator:
 
             prop_paths = np.array(list(itertools.product(self.receivers[j,:,:2].numpy(force=True)*self.map_resolution, self.transmitters[j,:,:2].numpy(force=True)*self.map_resolution)))
             xtrans_coords, ytrans_coords = prop_paths[..., 0].T, prop_paths[..., 1].T
-            axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0)
+            axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0, label=SRNs)
+
+            #The below line ensures that the text appears in between the max and min values, hence the avg has been calculated
+            xAvgLoc = [(xtrans_coords[0, i] + xtrans_coords[1, i]) / 2 for i in range(xtrans_coords.shape[1])]
+            labellines.labelLines(axes.get_lines(), xvals=xAvgLoc, align=True, fontsize=8, color='blue')
 
         axes.axis("image")
 
