@@ -200,10 +200,21 @@ This function finds the difference between the target and given SNR tensor
 """
 def findMinSNRVal(SNRs,targetSNR):
     
-    percentage_difference = ((torch.abs(targetSNR - SNRs)) / abs(targetSNR)) * 100.0
-    smallest_value, index = torch.min(percentage_difference, 0)
-    
-    return smallest_value, index
+    #percentage_difference = ((torch.abs(targetSNR - SNRs)) / abs(targetSNR)) * 100.0
+    #smallest_value, index = torch.min(percentage_difference, 0)
+    if SNRs.dim() == 0:
+        rms_errors = torch.sqrt((targetSNR - SNRs)**2)
+        smallest_value, index = torch.min(rms_errors, 0)
+        return smallest_value, index
+    elif SNRs.dim() == 1:
+        rms_errors = torch.sqrt((targetSNR - SNRs.unsqueeze(0))**2)
+        smallest_value, index = torch.min(rms_errors, 0)
+        return smallest_value, index
+    else:
+        rms_errors = torch.sqrt(torch.mean((targetSNR - SNRs)**2, dim=2))
+        smallest_value, index = torch.min(rms_errors, 0)
+        return smallest_value.view(-1,1), index.view(-1,1)
+    #return smallest_value, index
 
 """
 index: a tensor of index values where near optimal value occures

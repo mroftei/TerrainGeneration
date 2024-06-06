@@ -31,7 +31,7 @@ class ScenarioGenerator:
         n_workers=1,
         max_iter=5,
         optimizer_iter_ctr = 10,
-        optimizer_error_pct = 0.6,
+        optimizer_error_pct = 0.5,
         replicateSNR = True,
         dtype=torch.float32,
         device: Optional[torch.device] = None,

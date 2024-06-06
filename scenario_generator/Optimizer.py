@@ -216,7 +216,7 @@ def OptimalSolution(scenario,
         
         #9. Use the index to determine the optimal SNR values
         nearOptimalChannel_Z = OptimizerHelper.getMinIndexVal(index, channel_Z)
-        smallest_value, index = OptimizerHelper.findMinSNRVal(nearOptimalSNR,targetSNR)
+        smallest_value, index = OptimizerHelper.findMinSNRVal(nearOptimalSNR.squeeze(),targetSNR)
         
         if debugMode: print("Current iter: ",iteration_val)
         if debugMode: print("Current small value: ",smallest_value.squeeze().tolist())
