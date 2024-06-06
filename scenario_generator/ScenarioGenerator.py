@@ -107,14 +107,14 @@ class ScenarioGenerator:
                         # Regenerate new points and send it to the optimizer
                         self._create_nodes()
                 except Exception as e:
-                    print(e)
+                    if self._debug: print(e)
                     self._create_nodes()
                 
                 if self.max_iter < iter_control:
                     raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
 
             self.receivers = nearOptimalRxLoc
-            return nearOptimalChannel_Z
+            return nearOptimalChannel_Z, nearOptimalSNRs
         else:
             return
     
