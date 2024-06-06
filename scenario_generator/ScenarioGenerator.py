@@ -2,7 +2,6 @@ from typing import Optional
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
-import labellines
 
 import numpy as np
 import torch
@@ -32,7 +31,7 @@ class ScenarioGenerator:
         n_workers=1,
         max_iter=5,
         optimizer_iter_ctr = 10,
-        optimizer_error_pct = 0.5,
+        optimizer_error_pct = 0.6,
         replicateSNR = True,
         dtype=torch.float32,
         device: Optional[torch.device] = None,
@@ -46,7 +45,6 @@ class ScenarioGenerator:
         self.batch_size = batch_size
         self.h_tx = h_transmitters
         self.h_rx = h_receivers
-        self.generatedSNRs = []
         self.map_size = map_size
         self.map_resolution = map_resolution
         self.min_receiver_dist = min_receiver_dist
@@ -87,32 +85,35 @@ class ScenarioGenerator:
             iter_control = 0
             while(not target_Found):
                 iter_control += 1
-                target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs = OptimalSolution(scenario = self.sionna,
-                                                                                                        scen_map = self.map,
-                                                                                                        map_resolution=self.map_resolution,
-                                                                                                        los_requested=False,
-                                                                                                        targetSNR = target_snr,
-                                                                                                        replicateSNR=self.replicateSNR,
-                                                                                                        txLoc = self.transmitters,
-                                                                                                        rxLoc = self.receivers,
-                                                                                                        minDistRequirement = self.min_receiver_dist,
-                                                                                                        maxOutPostDist = self.map_size,
-                                                                                                        batch_size = self.batch_size,
-                                                                                                        device = self.device,
-                                                                                                        iteration_Controller = self.optimizer_iter_ctr,
-                                                                                                        padding_Size = 4,
-                                                                                                        errorPercentage = self.optimizer_error_pct,
-                                                                                                        plotData=False,
-                                                                                                        debugMode=self._debug)
-                if not target_Found:
-                    # Regenerate new points and send it to the optimizer
+                try:
+                    target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs = OptimalSolution(scenario = self.sionna,
+                                                                                                            scen_map = self.map,
+                                                                                                            map_resolution=self.map_resolution,
+                                                                                                            los_requested=False,
+                                                                                                            targetSNR = target_snr,
+                                                                                                            replicateSNR=self.replicateSNR,
+                                                                                                            txLoc = self.transmitters,
+                                                                                                            rxLoc = self.receivers,
+                                                                                                            minDistRequirement = self.min_receiver_dist,
+                                                                                                            maxOutPostDist = self.map_size,
+                                                                                                            batch_size = self.batch_size,
+                                                                                                            device = self.device,
+                                                                                                            iteration_Controller = self.optimizer_iter_ctr,
+                                                                                                            padding_Size = 4,
+                                                                                                            errorPercentage = self.optimizer_error_pct,
+                                                                                                            plotData=False,
+                                                                                                            debugMode=self._debug)
+                    if not target_Found:
+                        # Regenerate new points and send it to the optimizer
+                        self._create_nodes()
+                except Exception as e:
+                    print(e)
                     self._create_nodes()
                 
                 if self.max_iter < iter_control:
                     raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
 
             self.receivers = nearOptimalRxLoc
-            self.generatedSNRs = nearOptimalSNRs
             return nearOptimalChannel_Z
         else:
             return
@@ -132,8 +133,7 @@ class ScenarioGenerator:
         self.receivers[...,-1] = self.h_rx
 
     def PlotMap(self, SNRs=None, save_path=None):
-        SRNs = [str(round(a, 1)) for a in SNRs]
-        fig, axes = plt.subplots(nrows=1, figsize=(5, 5))
+        fig, axes = plt.subplots(nrows=1, figsize=(4, 4))
         extent = (0, self.map_size*self.map_resolution, 0, self.map_size*self.map_resolution)
         im = axes.imshow(self.map.numpy(force=True), extent=extent, origin="lower", cmap="Blues")
         values = torch.unique(self.map.ravel()).numpy(force=True)
@@ -151,11 +151,7 @@ class ScenarioGenerator:
 
             prop_paths = np.array(list(itertools.product(self.receivers[j,:,:2].numpy(force=True)*self.map_resolution, self.transmitters[j,:,:2].numpy(force=True)*self.map_resolution)))
             xtrans_coords, ytrans_coords = prop_paths[..., 0].T, prop_paths[..., 1].T
-            axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0, label=SRNs)
-
-            #The below line ensures that the text appears in between the max and min values, hence the avg has been calculated
-            xAvgLoc = [(xtrans_coords[0, i] + xtrans_coords[1, i]) / 2 for i in range(xtrans_coords.shape[1])]
-            labellines.labelLines(axes.get_lines(), xvals=xAvgLoc, align=True, fontsize=8, color='blue')
+            axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0)
 
         axes.axis("image")
 

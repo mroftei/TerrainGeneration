@@ -47,8 +47,8 @@ def runOnce(scenario,
     #5. replicate the Tx points to the same size as the batch size
     replicatedTxPoints = OptimizerHelper.replicatePoint(txLoc, resolution)
     
-    #6. Call the channel gain function and obtain the SNRs and the Channel_Z values
-    channel_Z, SNRs = OptimizerHelper.channelGainCalc(replicatedTxPoints, 
+    #6. Call the channel gain function and obtain the Power and the Channel_Z values
+    channel_Z, PowerDB = OptimizerHelper.channelGainCalc(replicatedTxPoints, 
                                                         sprayedReceiverTensorRx, 
                                                         scen_map, 
                                                         map_resolution,
@@ -56,57 +56,74 @@ def runOnce(scenario,
                                                         los_requested,
                                                         scenario)
     
-    #7. Squeeze the SNRs to the appropriate shape
-    SNRs = SNRs.squeeze(-1,-2) #128x6x1
+    #7. Squeeze the PowerDB to the appropriate shape
+    PowerDB = PowerDB.squeeze(-1,-2) #128x6x1
     
     #8. Find the distance between the Tx and Rx
     completeDist = OptimizerHelper.distanceCalc(replicatedTxPoints,sprayedReceiverTensorRx)
     
-    #9. Take the SNRs and filter it, and a form a smooth curve
-    filteredSNR = OptimizerHelper.avgFilter(SNRs, padding_Size, kernal_Size, stride_Size)
+    #9. Take the PowerDB and filter it, and a form a smooth curve
+    filteredPowerDB = OptimizerHelper.avgFilter(PowerDB, padding_Size, kernal_Size, stride_Size)
     
     #10. Based on the filter output and using its size, clip the Tx and Rx tensors
-    sprayedTensor_clipped = OptimizerHelper.clipTensor(sprayedReceiverTensorRx, filteredSNR)
-    replicatedTxPoints_clipped = OptimizerHelper.clipTensor(replicatedTxPoints, filteredSNR)
+    sprayedTensor_clipped = OptimizerHelper.clipTensor(sprayedReceiverTensorRx, filteredPowerDB)
+    replicatedTxPoints_clipped = OptimizerHelper.clipTensor(replicatedTxPoints, filteredPowerDB)
     
     #11. Find the distance between the clipped Tx ad Rx
     clippedDist = OptimizerHelper.distanceCalc(replicatedTxPoints_clipped,sprayedTensor_clipped)
     
+    #Convert the PowerDB and FilteredPowerDB back to SNR for plotting puposes
+    filteredSNR = filteredPowerDB - scenario.noise_power_db
+    PowerSNR = PowerDB - scenario.noise_power_db
+    
     #12. Plot the data if the flag is set
     if plotData:
-        OptimizerHelper.plotSNRvsDist(filteredSNR,clippedDist,SNRs,completeDist)
-    
+        OptimizerHelper.plotSNRvsDist(filteredPowerDB,clippedDist,PowerDB,completeDist)
+        OptimizerHelper.plotSNRvsDist(filteredSNR,clippedDist,PowerSNR,completeDist)
+
+    #Convert the FilterPower in DB to Linear Power i.e., Linear Space
+    filteredPowerLinear = 10**((filteredPowerDB)/10) 
+
     if len(targetSNR) == 1:
-        #The new check flag tells us whether we want to replicate the SNR across the RxTower or distribute it
+        #The new check flag tells us whether we want to replicate the Power across the RxTower or distribute it
+        targetPowerLinear = 10**((targetSNR + scenario.noise_power_db)/10) #SNR in dB to PowerGoal Linear Space
+        
         if replicateSNR:
             #Here the SNR maybe a single variable
-            #13. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
+            #13. Using the targetPowerLinear value, find the closet possible value of the Power and determine the index, 
             # use the index for finding the near Optimal Rx location
-            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
-            if targetSNR[0] > torch.min(maxTensor).to('cpu').tolist() or targetSNR[0] < torch.max(minTensor).to('cpu').tolist():
-                raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
-            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR[0])
+            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredPowerLinear)  
+            if targetPowerLinear < torch.sum(minTensor):
+                raise Exception("The TargetPower is not in the feasible SNR region of the Rx Towers")
+            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredPowerLinear,targetPowerLinear)
             nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
         else:
-            #Here the SNR maybe a single variable, However, we try to solve for total SNR and distribute it across the Rx Towers
-            #14. Using the targetSNR value, find the closet possible value of the SNR and determine the index, 
-            # use the index for finding the near Optimal Rx location
-            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
-            if targetSNR[0] > torch.sum(maxTensor).to('cpu').tolist() or targetSNR[0] < torch.sum(minTensor).to('cpu').tolist():
-                raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
-            targetSNR = OptimizerHelper.distributeSNRtoRx(minTensor, maxTensor, targetSNR, minTensor.shape[1], dev)
-            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
+            #Here the powerGoalLinear maybe a single variable, However, we try to solve for total Power and distribute it across the Rx Towers
+            #14. Using the powerGoalLinear value, find the closet possible value of the Power and determine the index, 
+            # use the index for finding the near Optimal Rx location 
+            minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredPowerLinear)  
+            
+            if targetPowerLinear < torch.sum(minTensor):
+                raise Exception("The TargetPower is not in the feasible SNR region of the Rx Towers")
+            
+            targetPowerLinear = OptimizerHelper.distributeSNRtoRx(minTensor, maxTensor, targetPowerLinear, minTensor.shape[1], dev)
+            #targetSNR = 10*torch.log10(targetPower) - scenario.noise_power_db
+            #filteredPowerDB = 10*torch.log10(filteredPowerDB) - scenario.noise_power_db
+            smallest_value, index = OptimizerHelper.findMinSNRVal(filteredPowerLinear,targetPowerLinear)
             nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
     else:
         #15. Here the SNR maybe a list
-        minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredSNR)
-        if sum(targetSNR) > torch.sum(maxTensor).to('cpu').tolist() or sum(targetSNR) < torch.sum(minTensor).to('cpu').tolist():
+        targetPowerLinear = 10**((targetSNR + scenario.noise_power_db)/10) #SNR in dB to Linear Power
+        minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredPowerLinear)
+        
+        if sum(targetPowerLinear) < torch.sum(minTensor):
             raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
-        targetSNR = OptimizerHelper.assignSNRtoRx(minTensor, maxTensor, targetSNR, dev)
-        smallest_value, index = OptimizerHelper.findMinSNRVal(filteredSNR,targetSNR)
+        
+        targetPowerLinear = OptimizerHelper.assignSNRtoRx(minTensor, maxTensor, targetPowerLinear, dev)
+        smallest_value, index = OptimizerHelper.findMinSNRVal(filteredPowerLinear,targetPowerLinear)
         nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
 
-    return channel_Z, filteredSNR, nearOptimalRxLoc, targetSNR
+    return channel_Z, filteredPowerLinear, nearOptimalRxLoc, targetPowerLinear
 
 """
 The Main Optimizer function which is responsible for finding the near optimal solution
@@ -133,7 +150,7 @@ def OptimalSolution(scenario,
                     plotData = False,
                     debugMode = False):
     
-    assert isinstance(targetSNR, list), "targetSNR must be a list"
+    #assert isinstance(targetSNR, torch.Tensor), "targetSNR must be a list"
     assert rxLoc.shape[1] == len(targetSNR) or len(targetSNR) == 1, "Number of TargetSNR must be either 1 or number of receivers sent"
 
     mapBoundary = torch.tensor([[[0,0],[scen_map.shape[0]-1,0],[scen_map.shape[0]-1,scen_map.shape[1]-1],[0,scen_map.shape[1]-1]]]).to(device)
@@ -145,25 +162,25 @@ def OptimalSolution(scenario,
     replicatedTxPoints = OptimizerHelper.replicatePoint(txLoc, batch_size)
     
     #3. call the runonce function which will do all the calculations and provide the first estimate for the near optimal Rx location and SNR
-    channel_Z, filteredSNR, nearOptimalRxLoc, targetSNR = runOnce(scenario,
-                                                                scen_map,
-                                                                map_resolution,
-                                                                direction,
-                                                                los_requested,
-                                                                targetSNR,
-                                                                replicateSNR,
-                                                                txLoc,
-                                                                rxLoc,
-                                                                minDistRequirement,
-                                                                maxOutPostDist,
-                                                                mapBoundary,
-                                                                batch_size,
-                                                                padding_Size, 
-                                                                kernal_Size, 
-                                                                stride_Size,
-                                                                device,
-                                                                plotData,
-                                                                debugMode)
+    channel_Z, filteredPowerLinear, nearOptimalRxLoc, targetPowerLinear = runOnce(scenario,
+                                                                        scen_map,
+                                                                        map_resolution,
+                                                                        direction,
+                                                                        los_requested,
+                                                                        targetSNR,
+                                                                        replicateSNR,
+                                                                        txLoc,
+                                                                        rxLoc,
+                                                                        minDistRequirement,
+                                                                        maxOutPostDist,
+                                                                        mapBoundary,
+                                                                        batch_size,
+                                                                        padding_Size, 
+                                                                        kernal_Size, 
+                                                                        stride_Size,
+                                                                        device,
+                                                                        plotData,
+                                                                        debugMode)
     
     iteration_val = 0
     
@@ -173,7 +190,7 @@ def OptimalSolution(scenario,
     #5. start a while loop
     while(True):
         #6. Call the channel gain function
-        channel_Z, SNRs = OptimizerHelper.channelGainCalc(replicatedTxPoints, 
+        channel_Z, PowerDB = OptimizerHelper.channelGainCalc(replicatedTxPoints, 
                                                             replicatedRxLoc, 
                                                             scen_map, 
                                                             map_resolution,
@@ -181,18 +198,25 @@ def OptimalSolution(scenario,
                                                             los_requested,
                                                             scenario)
         
-        #7. Reduce the dimensions of the SNR as per the dimension requirement
-        SNRs = SNRs.squeeze(-1,-2)
+        #7. Reduce the dimensions of the PowerDB as per the dimension requirement and change to Linear Space
+        LinearPower = 10**((PowerDB.squeeze(-1,-2))/10)
         
-        #8. Find the index of the closest value of the SNR to the targetSNR
+        #8. Find the index of the closest value of the Power to the targetPowerLinear
         if len(targetSNR) == 1:
-            smallest_value, index = OptimizerHelper.findMinSNRVal(SNRs,targetSNR[0])
+            smallest_value, index = OptimizerHelper.findMinSNRVal(LinearPower,targetPowerLinear)
+            nearOptimalPower = OptimizerHelper.getMinIndexVal(index, LinearPower)
+            if replicateSNR:    
+                nearOptimalSNR = 10*torch.log10(nearOptimalPower) - scenario.noise_power_db
+            else:
+                nearOptimalSNR = 10*torch.log10(nearOptimalPower.sum()) - scenario.noise_power_db
         else:
-            smallest_value, index = OptimizerHelper.findMinSNRVal(SNRs,targetSNR)
+            smallest_value, index = OptimizerHelper.findMinSNRVal(LinearPower,targetPowerLinear)
+            nearOptimalPower = OptimizerHelper.getMinIndexVal(index, LinearPower)
+            nearOptimalSNR = (10*torch.log10(nearOptimalPower) - scenario.noise_power_db).view(1,-1)
         
         #9. Use the index to determine the optimal SNR values
-        nearOptimalSNRs = OptimizerHelper.getMinIndexVal(index, SNRs)
         nearOptimalChannel_Z = OptimizerHelper.getMinIndexVal(index, channel_Z)
+        smallest_value, index = OptimizerHelper.findMinSNRVal(nearOptimalSNR,targetSNR)
         
         if debugMode: print("Current iter: ",iteration_val)
         if debugMode: print("Current small value: ",smallest_value.squeeze().tolist())
@@ -202,13 +226,13 @@ def OptimalSolution(scenario,
             if debugMode: print('The Target is found!!')
             if debugMode: print("The near Optimal Rx locations are: ", nearOptimalRxLoc)
             if debugMode: print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
-            if debugMode: print("The near Optimal SNRs are: ", nearOptimalSNRs)
+            if debugMode: print("The near Optimal SNRs are: ", nearOptimalSNR)
             
-            return target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs
+            return target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNR
         
         if iteration_val == iteration_Controller:
             # if debugMode: print("I am Unable to find the optimal solution, please retry with a new scenario set!!")
-            #raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
+            # raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
             return target_Found, None, None, None
         
         iteration_val += 1

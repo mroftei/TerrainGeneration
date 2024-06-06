@@ -162,37 +162,35 @@ def channelGainCalc(txLocations,
                     map_resolution,
                     direction,
                     los_requested,
-                    scenario,
-                    total_power = False):
+                    scenario):
     
     scenario.update_topology(txLocations, rxLocations, scen_map, map_resolution=map_resolution, direction=direction, los_requested=los_requested)
-    z, rx_pow_db = scenario.generate_channels()
-    
-    if total_power:
-        rx_pow_db = 10*torch.log10(torch.sum(10**(rx_pow_db/10), 1))
+    z, rx_pow = scenario.generate_channels()
 
-    snr = rx_pow_db - scenario.noise_power_db
-    return z, snr
+    #We will convert the power to Power DB, this is to ensure the filter can operate
+    PowerDB = 10*torch.log10(rx_pow)
+
+    return z, PowerDB
 
 """
-SNRs: a tensor which needs to be filtered
+Power: a tensor which needs to be filtered
 padding_size: number of zeros to be added on either side of the tensor
 kernal_size: filter size
 stride_Size: filter movement size
 """
-def avgFilter(SNRs, padding_Size, kernal_Size, stride_Size):
+def avgFilter(Power, padding_Size, kernal_Size, stride_Size):
     pad_op = torch.nn.ReflectionPad1d(padding_Size)
     average_Filter = torch.nn.AvgPool1d(kernel_size = kernal_Size,
                                         padding = 0,
                                         stride = stride_Size, count_include_pad=False)
     
     filteredList = []
-    for i in range(SNRs.shape[1]):
-        filteredList.append(average_Filter(pad_op(SNRs[:,i,:].reshape(1,1,-1))))
+    for i in range(Power.shape[1]):
+        filteredList.append(average_Filter(pad_op(Power[:,i,:].reshape(1,1,-1))))
     
-    filtered_SNR = torch.cat(filteredList, axis=1).permute(2,1,0)
+    filtered_Power = torch.cat(filteredList, axis=1).permute(2,1,0)
     
-    return filtered_SNR
+    return filtered_Power
 
 """
 SNRs: a tensor containing the generated SNRs
@@ -288,47 +286,48 @@ def getMinMaxTensor(givenTensor):
     return minTensor, maxTensor
 
 """
-minSNRTensor: a tensor containing the minimum values
-maxSNRTensor: a tensor containing the maximum values
-targetSNR: a tensor containing the target SNR values to be assigned to Rx
-This function uses the linear assignment algorithm to determine which Receivers is able to achieve the given SNR values
+minTensor: a tensor containing the minimum values
+maxTensor: a tensor containing the maximum values
+targetPower: a tensor containing the target Power values to be assigned to Rx
+This function uses the linear assignment algorithm to determine which Receivers is able to achieve the given Power values
 """
-def assignSNRtoRx(minSNRTensor, maxSNRTensor, targetSNRs, dev):
+def assignSNRtoRx(minTensor, maxTensor, targetPower, dev):
 
-    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
-    targetSNRs = torch.tensor(targetSNRs, device=dev).reshape(1,len(targetSNRs),1)
-    meanSNRs = (maxSNRTensor + minSNRTensor) / 2.0
-    distance_Vector = torch.abs(targetSNRs - meanSNRs.transpose(0, 1)).squeeze().transpose(0, 1).to('cpu').numpy()
-    RxNodes_set, SNR_Nodes_set = np.meshgrid(np.arange(distance_Vector.shape[1]), np.arange(distance_Vector.shape[0]))
+    newPowerTensor = torch.zeros(minTensor.shape,device=dev)
+    targetPower = targetPower.reshape(1,len(targetPower),1).to(dev)
+    meanPower = (maxTensor + minTensor) / 2.0
+    distance_Vector = torch.abs(targetPower - meanPower.transpose(0, 1)).squeeze().transpose(0, 1).to('cpu').numpy()
+    RxNodes_set, Power_Nodes_set = np.meshgrid(np.arange(distance_Vector.shape[1]), np.arange(distance_Vector.shape[0]))
 
-    SNR_nodes = SNR_Nodes_set.ravel()
+    Power_nodes = Power_Nodes_set.ravel()
     Rx_nodes = RxNodes_set.ravel()
     arc_costs = distance_Vector.ravel()
 
     Assign_SNRtoRx = linear_sum_assignment.SimpleLinearSumAssignment()
-    Assign_SNRtoRx.add_arcs_with_cost(SNR_nodes, Rx_nodes, arc_costs)
+    Assign_SNRtoRx.add_arcs_with_cost(Power_nodes, Rx_nodes, arc_costs)
     status = Assign_SNRtoRx.solve()
 
     if status == Assign_SNRtoRx.OPTIMAL:
         for i in range(0, Assign_SNRtoRx.num_nodes()):
-            newSNRTensor[:,Assign_SNRtoRx.right_mate(i)] = targetSNRs[:,i]
+            newPowerTensor[:,Assign_SNRtoRx.right_mate(i)] = targetPower[:,i]
     else:
-        raise Exception("Unable to assign SNRs to Rx Nodes")
+        raise Exception("Unable to assign Power to Rx Nodes")
 
-    return newSNRTensor
+    return newPowerTensor
 
 """
-minSNRTensor: a tensor containing the minimum values
-maxSNRTensor: a tensor containing the maximum values
+minTensor: a tensor containing the minimum values
+maxTensor: a tensor containing the maximum values
 targetSNR: a tensor containing the target SNR values to be assigned to Rx
 numOfRxTowers: Number of receivers
 dev: Device on which the tensors are located
 This function is LP solver, it tries to satisfy the constraints provided. It does not have an actual optimization equation to solve, 
 hence, its job is to just meet the requirements of constraints and provide an output.
 """
-def GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+def GLOPSolver(minTensor, maxTensor, targetPower, numOfRxTowers, dev):
 
-    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
+    targetPower = targetPower.to('cpu').tolist()[0]
+    newPowerTensor = torch.zeros(minTensor.shape,device=dev)
     LPSolver = pywraplp.Solver.CreateSolver("GLOP")
 
     #Enable it to solve problems in two directions i.e., the dual of the problem
@@ -338,11 +337,11 @@ def GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
     for i in range(numOfRxTowers):
         var = LPSolver.NumVar(-1 * (LPSolver.infinity()), LPSolver.infinity(), f'x{i+1}')
         variables.append(var)
-        LPSolver.Add(var >= float(minSNRTensor[:,i,0].to('cpu').numpy()[0]))
-        LPSolver.Add(var <= float(maxSNRTensor[:,i,0].to('cpu').numpy()[0]))
+        LPSolver.Add(var >= float(minTensor[:,i,0].to('cpu').numpy()[0]))
+        LPSolver.Add(var <= float(maxTensor[:,i,0].to('cpu').numpy()[0]))
 
     #Add constraint that the sum of variables must be equal to the target SNR, hence the lower and upper bound is target value
-    constraint = LPSolver.Constraint(targetSNR[0], targetSNR[0])
+    constraint = LPSolver.Constraint((targetPower), (targetPower))
     for var in variables:
         constraint.SetCoefficient(var, 1)
 
@@ -357,14 +356,14 @@ def GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
 
     if status == LPSolver.OPTIMAL:
         for i, var in enumerate(variables):
-            newSNRTensor[:,i] = var.solution_value()
-        return newSNRTensor
+            newPowerTensor[:,i] = var.solution_value()
+        return newPowerTensor
     return None
 
 """
-minSNRTensor: a tensor containing the minimum values
-maxSNRTensor: a tensor containing the maximum values
-targetSNR: a tensor containing the target SNR values to be assigned to Rx
+minTensor: a tensor containing the minimum values
+maxTensor: a tensor containing the maximum values
+targetPower: a tensor containing the target Power values to be assigned to Rx
 numOfRxTowers: Number of receivers
 dev: Device on which the tensors are located
 This function does solves a quadratic equation i.e., a least square estimation technique.
@@ -374,28 +373,29 @@ We also use the Min and Max SNR as constraints, to ensure we stay within the lim
 def ObjectiveFunction(individualParamaters_list, targetSum):
     return (sum(individualParamaters_list) - targetSum)**2
 
-def PowellSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+def PowellSolver(minTensor, maxTensor, targetPower, numOfRxTowers, dev):
     
-    newSNRTensor = torch.zeros(minSNRTensor.shape,device=dev)
-    minSNRTensorFlattened = minSNRTensor.flatten().to('cpu').numpy()
-    maxSNRTensorFlattened = maxSNRTensor.flatten().to('cpu').numpy()
+    targetPower = targetPower.to('cpu').tolist()[0]
+    newPowerTensor = torch.zeros(minTensor.shape,device=dev)
+    minTensorFlattened = minTensor.flatten().to('cpu').numpy()
+    maxTensorFlattened = maxTensor.flatten().to('cpu').numpy()
 
-    constraints_Bounds = list(zip(minSNRTensorFlattened, maxSNRTensorFlattened))
+    constraints_Bounds = list(zip(minTensorFlattened, maxTensorFlattened))
     
-    Initial_Guess = [(np.mean(pair) * -1.0) for pair in constraints_Bounds]
-    OptimalSolutionResult = minimize(ObjectiveFunction, Initial_Guess, args=(targetSNR[0],), method='Powell', bounds=constraints_Bounds)
+    Initial_Guess = [(np.mean(pair) * 1.0) for pair in constraints_Bounds]
+    OptimalSolutionResult = minimize(ObjectiveFunction, Initial_Guess, args=(targetPower,), method='Powell', bounds=constraints_Bounds)
     
     if OptimalSolutionResult.success:
         if OptimalSolutionResult.fun < 1e-5:            
             for i, x in enumerate(OptimalSolutionResult.x):
-                newSNRTensor[:,i] = x
-            return newSNRTensor
+                newPowerTensor[:,i] = x
+            return newPowerTensor
     return None
 
 """
-minSNRTensor: a tensor containing the minimum values
-maxSNRTensor: a tensor containing the maximum values
-targetSNR: a tensor containing the target SNR values to be assigned to Rx
+minTensor: a tensor containing the minimum values
+maxTensor: a tensor containing the maximum values
+targetPower: a tensor containing the target Power values to be assigned to Rx
 numOfRxTowers: Number of receivers
 dev: Device on which the tensors are located
 
@@ -403,14 +403,34 @@ To provide redundancy, as there cases when one of the solvers may not converge. 
 another optimizer. Here we have the GLOPsolver i.e., the LP solver and the Powell Solver which is quadratic solver.
 If neither of them achieve the goal, an exception is raised.
 """
-def distributeSNRtoRx(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev):
+def distributeSNRtoRx(minTensor, maxTensor, targetPower, numOfRxTowers, dev):
     
-    snrTensor = GLOPSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev)
-    if snrTensor is not None:
-        return snrTensor
+    scaleTarget = 0
+    #Scale the parameters
+    if (minTensor < 1e-7).all():
+        minTensor = minTensor * 1e12
+    if (minTensor > 1e7).all():
+        minTensor = minTensor * 1e-12
+
+    if (maxTensor < 1e-7).all():
+        maxTensor = maxTensor * 1e12
+    if (maxTensor > 1e7).all():
+        maxTensor = maxTensor * 1e-12
     
-    snrTensor = PowellSolver(minSNRTensor, maxSNRTensor, targetSNR, numOfRxTowers, dev)
-    if snrTensor is not None:
-        return snrTensor
+    if targetPower < 1e-7:
+        targetPower = targetPower * 1e12
+        scaleTarget = 1e12
+    if targetPower > 1e7:
+        targetPower = targetPower * 1e-12
+        scaleTarget = 1e-7
+
+
+    powerTensor = GLOPSolver(minTensor, maxTensor, targetPower, numOfRxTowers, dev)
+    if powerTensor is not None:
+        return (powerTensor / scaleTarget)
+    
+    powerTensor = PowellSolver(minTensor, maxTensor, targetPower, numOfRxTowers, dev)
+    if powerTensor is not None:
+        return (powerTensor / scaleTarget)
     else:
         raise Exception("Optimization failed, neither of the solvers are able to converge")
