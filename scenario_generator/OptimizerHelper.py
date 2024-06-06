@@ -240,7 +240,6 @@ def plotSNRvsDist(filteredSNR,dist1,unfilteredSNR,dist2):
         plt.plot(d_unclipped,unfSNRindividual)
         plt.plot(d_clipped,fSNRindividual)
         plt.savefig(f"plt1_{i}.jpg")
-        plt.show()
     
 """
 tensorToModify: a tensor who's dimension needs to be clipped

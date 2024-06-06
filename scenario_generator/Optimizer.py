@@ -116,7 +116,7 @@ def runOnce(scenario,
         targetPowerLinear = 10**((targetSNR + scenario.noise_power_db)/10) #SNR in dB to Linear Power
         minTensor, maxTensor = OptimizerHelper.getMinMaxTensor(filteredPowerLinear)
         
-        if sum(targetPowerLinear) < torch.sum(minTensor):
+        if torch.sum(targetPowerLinear) < torch.sum(minTensor):
             raise Exception("The TargetSNR is not in the feasible SNR region of the Rx Towers")
         
         targetPowerLinear = OptimizerHelper.assignSNRtoRx(minTensor, maxTensor, targetPowerLinear, dev)

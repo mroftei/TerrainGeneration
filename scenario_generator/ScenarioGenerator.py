@@ -101,7 +101,7 @@ class ScenarioGenerator:
                                                                                                             iteration_Controller = self.optimizer_iter_ctr,
                                                                                                             padding_Size = 4,
                                                                                                             errorPercentage = self.optimizer_error_pct,
-                                                                                                            plotData=False,
+                                                                                                            plotData=self._debug,
                                                                                                             debugMode=self._debug)
                     if not target_Found:
                         # Regenerate new points and send it to the optimizer
