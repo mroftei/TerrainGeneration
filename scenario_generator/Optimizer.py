@@ -123,6 +123,24 @@ def runOnce(scenario,
         smallest_value, index = OptimizerHelper.findMinSNRVal(filteredPowerLinear,targetPowerLinear)
         nearOptimalRxLoc = OptimizerHelper.getMinIndexVal(index, sprayedTensor_clipped)
 
+    #####Memory Management######
+    del minimumLocationPoints
+    del outpostPoints
+    del sprayedReceiverTensorRx
+    del replicatedTxPoints
+    del completeDist
+    del filteredSNR
+    del PowerSNR
+    del minTensor
+    del maxTensor
+    del filteredPowerDB
+    del replicatedTxPoints_clipped
+    del sprayedTensor_clipped
+    del index
+    del PowerDB
+    del smallest_value
+    torch.cuda.empty_cache()
+
     return channel_Z, filteredPowerLinear, nearOptimalRxLoc, targetPowerLinear
 
 """
@@ -222,6 +240,16 @@ def OptimalSolution(scenario,
         if debugMode: print("Current small value: ",smallest_value.squeeze().tolist())
         
         if (smallest_value <= errorPercentage).all():
+            
+            ########Memory Management############
+            del replicatedTxPoints
+            del mapBoundary
+            del replicatedRxLoc
+            del LinearPower
+            del index
+            del nearOptimalPower
+            torch.cuda.empty_cache()
+
             target_Found = True
             if debugMode: print('The Target is found!!')
             if debugMode: print("The near Optimal Rx locations are: ", nearOptimalRxLoc)
@@ -233,6 +261,16 @@ def OptimalSolution(scenario,
         if iteration_val == iteration_Controller:
             # if debugMode: print("I am Unable to find the optimal solution, please retry with a new scenario set!!")
             # raise Exception("I am Unable to find the optimal solution, please retry with a new scenario set!!")
+            
+            ########Memory Management############
+            del replicatedTxPoints
+            del mapBoundary
+            del replicatedRxLoc
+            del LinearPower
+            del index
+            del nearOptimalPower
+            torch.cuda.empty_cache()
+
             return target_Found, None, None, None
         
         iteration_val += 1
