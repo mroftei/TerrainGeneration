@@ -24,7 +24,6 @@ class ScenarioGenerator:
         map_size=500,
         map_resolution=12,
         min_receiver_dist=200,
-        min_path_distance=50,
         frame_size=1024,
         f_c: float = .92e9,
         bw: float = 30e3,
@@ -32,10 +31,8 @@ class ScenarioGenerator:
         seed=42,
         n_workers=1,
         max_iter=5,
-        optimizer_iter_ctr = 10,
-        optimizer_error_pct = 0.5,
+        optimizer_error = 0.5,
         replicateSNR = True,
-        sionna = None,
         dtype=torch.float32,
         device: Optional[torch.device] = None,
         debug = False
@@ -51,7 +48,6 @@ class ScenarioGenerator:
         self.map_size = map_size
         self.map_resolution = map_resolution
         self.min_receiver_dist = min_receiver_dist
-        self.min_path_distance = min_path_distance
         self.seed=seed
         self.rng = torch.Generator(device=device).manual_seed(seed)
         self.device = device
@@ -59,18 +55,11 @@ class ScenarioGenerator:
         self._debug = debug
         self.max_iter = max_iter
         self.replicateSNR = replicateSNR
-        self.optimizer_iter_ctr = optimizer_iter_ctr
-        self.optimizer_error_pct = optimizer_error_pct
         self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         # data type
         assert not dtype.is_complex, "'dtype' must be complex type"
         self._dtype_complex = dtype.to_complex()
-
-        # if sionna is not None:
-        #     self.sionna = sionna
-        # else:
-        #     self.sionna = SionnaScenario(n_bs=n_receivers, n_ut=n_transmitters, batch_size=batch_size, frame_size=frame_size, f_c=f_c, bw=bw, noise_power_dB=noise_power_dB, seed=seed, dtype=self._dtype_complex, device=self.device)
 
         self.chan_gen = ChannelGenerator(
             map_resolution = map_resolution,
@@ -85,7 +74,7 @@ class ScenarioGenerator:
             minDist = min_receiver_dist,
             batch_size = batch_size,
             max_iters = max_iter,
-            max_error = optimizer_error_pct,
+            max_error = optimizer_error,
             seed = seed,
             dtype = dtype,
             device = device,
@@ -93,65 +82,34 @@ class ScenarioGenerator:
 
         )
 
-        # self.RegenerateFullScenario()
-
     def RegenerateFullScenario(self, target_snr=None):
         map_diagonal = np.sqrt(np.sum(np.power(self.map_size, 2)))
         if self.min_receiver_dist > map_diagonal:
             raise Exception("Invalid min receiver distance and map size specified")
-
-        if self.min_path_distance > map_diagonal:
-            raise Exception("Invalid min path distance and map size specified")
         
         self.map = self.map_gen() #Sample map generator
         
         self._create_nodes()
         
         if target_snr is not None:
-            target_Found = False
             iter_control = 0
-            while(not target_Found):
+            target_snr = target_snr.to(self.device)
+            while(True):
                 iter_control += 1
                 try:
-                    # target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNRs = OptimalSolution(scenario = self.sionna,
-                    #                                                                                         scen_map = self.map,
-                    #                                                                                         map_resolution=self.map_resolution,
-                    #                                                                                         los_requested=False,
-                    #                                                                                         targetSNR = target_snr,
-                    #                                                                                         replicateSNR=self.replicateSNR,
-                    #                                                                                         txLoc = self.transmitters,
-                    #                                                                                         rxLoc = self.receivers,
-                    #                                                                                         minDistRequirement = self.min_receiver_dist,
-                    #                                                                                         maxOutPostDist = self.map_size,
-                    #                                                                                         batch_size = self.batch_size,
-                    #                                                                                         device = self.device,
-                    #                                                                                         iteration_Controller = self.optimizer_iter_ctr,
-                    #                                                                                         padding_Size = 4,
-                    #                                                                                         errorPercentage = self.optimizer_error_pct,
-                    #                                                                                         plotData=self._debug,
-                    #                                                                                         debugMode=self._debug)
-                    
-                    self.chan_gen(self.map, self.transmitters, self.receivers, target_snr, los_requested=False)
-                    if not target_Found:
-                        # Regenerate new points and send it to the optimizer
-                        self._create_nodes()
-                except Exception as e:
+                    h_T, self.receivers = self.chan_gen(self.map, self.transmitters, self.receivers, target_snr, los_requested=False)
+                    return h_T
+                except AssertionError as e:
                     if self._debug: print(e)
                     self._create_nodes()
                 
-                if self.max_iter < iter_control:
-                    raise Exception("Exceeded the maximum number of iterations for finding optimal receivers for given SNRs")
-
-            self.receivers = nearOptimalRxLoc
-            return nearOptimalChannel_Z, nearOptimalSNRs
+                if iter_control > self.max_iter:
+                    raise Exception("Impossible problem found. Something is broken")
         else:
-            self.sionna.update_topology(self.transmitters.repeat((128,1,1)), self.receivers.repeat((128,1,1)), self.map, map_resolution=self.map_resolution, direction='uplink', los_requested=False)
-            z, rx_pow = self.sionna.generate_channels()
+            self.chan_gen.sionna.update_topology(self.transmitters.repeat((128,1,1)), self.receivers.repeat((128,1,1)), self.map, map_resolution=self.map_resolution, direction='uplink', los_requested=False)
+            z, _ = self.chan_gen.sionna.generate_channels()
 
-            #We will convert the power to Power DB, this is to ensure the filter can operate
-            SNR_dB = 10*torch.log10(rx_pow) - self.sionna.noise_power_db
-
-            return z.to(self.device).clone(), SNR_dB.to(self.device).clone()
+            return z.to(self.device)[:1]
     
     def _create_nodes(self):
         self.transmitters = torch.randint(self.map_size, size=(1, self.n_tx, 3), generator=self.rng, dtype=self._dtype, device=self.device)

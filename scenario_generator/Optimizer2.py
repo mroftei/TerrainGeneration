@@ -3,9 +3,7 @@ import torch
 import matplotlib.pyplot as plt
 from sionna_torch import SionnaScenario
 
-from ortools.graph.python import linear_sum_assignment
 from ortools.linear_solver import pywraplp
-from scipy.optimize import minimize
 
 
 class ChannelGenerator:
@@ -46,7 +44,7 @@ class ChannelGenerator:
         tx_xyz,
         rx_xyz,
         target_snr,
-        los_requested=False,
+        los_requested = False,
         *args: Any, 
         **kwds: Any
     ) -> Any:
@@ -54,14 +52,20 @@ class ChannelGenerator:
         assert rx_xyz.shape[0] == 1 and rx_xyz.shape[1] == self.config['n_rx'], "Rx shape incorrect"
         assert rx_xyz.shape[1] == len(target_snr) or len(target_snr) == 1, "Length of target_snr must be either 1 or number of receivers sent"
 
-        # Replicate the Tx points to match the batch size
-        # tx_xyz = tx_xyz.repeat(self.config['batch_size'],1,1) 
+        # Convert target to required forms
+        target_pow_db = target_snr + self.sionna.noise_power_db
+        target_pow_linear = 10**(target_pow_db/10) #SNR in dB to PowerGoal Linear Space
 
-        target_pow_linear = 10**((target_snr + self.sionna.noise_power_db)/10) #SNR in dB to PowerGoal Linear Space
-
+        # Estimate the channel gain along each path
         power_est_db, rx_xyz_sprayed = self._estimate_path_gain(tx_xyz, rx_xyz, scenario_map, los_requested)
 
-        rx_near_optimal = self._get_initial_guess(target_pow_linear, power_est_db, rx_xyz_sprayed)
+        # Get a best initial guess for receiver locations that could meet the requirement
+        rx_near_optimal = self._get_initial_guess(target_pow_linear, power_est_db, rx_xyz, rx_xyz_sprayed)
+
+        # Loop until channel meeting requirements is found
+        h_T, rx_xyz = self._gen_matching_channels(rx_near_optimal, tx_xyz, scenario_map, target_pow_db, los_requested)
+        
+        return h_T, rx_xyz
         
 
     def _estimate_path_gain(self, tx_xyz, rx_xyz, scen_map, los_requested):
@@ -83,50 +87,42 @@ class ChannelGenerator:
         #3. Now verify if those new endpoints lie within the boundary of the map
         map_boundary = torch.tensor([[[0,0],[map_size-1,0],[map_size-1,map_size-1],[0,map_size-1]]], device=self.device)
         for i in range(map_boundary.shape[1]):
-            boundaryPointA, boundaryPointB = (map_boundary[:,i].reshape(1,1,-1), map_boundary[:,(i + 1) % map_boundary.shape[1]].reshape(1,1,-1))
+            boundaryPointA  = map_boundary[:,i].reshape(1,1,-1)
+            boundaryPointB = map_boundary[:,(i + 1) % map_boundary.shape[1]].reshape(1,1,-1)
             max_points = self._get_poi(boundaryPointA,boundaryPointB,tx_xyz,max_points)
         
         #4. Spray the points between the min and Max Rx locations based on resolutions
         tx_xyz_replicated = tx_xyz.repeat(self.config['batch_size'],1,1) 
-        spray = torch.linspace(0, 1, self.config['batch_size'], device=self.device).reshape(-1, 1, 1)
-        ones = torch.ones((self.config['batch_size'], 1, 1), device=self.device)
-        x = (max_points[:,:,0] - min_points[:,:,0]).reshape(1,-1,1) * spray + min_points[:,:,0].reshape(1, -1, 1)
-        y = (min_points[:,:,1] - max_points[:,:,1]).reshape(1,-1,1)/(min_points[:,:,0]-max_points[:,:,0]).reshape(1,-1,1)*(x - min_points[:,:,0].reshape(1, -1, 1)) + min_points[:,:,1].reshape(1, -1, 1)
-        z = ones * max_points[:,:,2].reshape(1,-1,1)
-        sprayed_tensor = torch.stack((x,y,z),dim=2).squeeze(-1)
+        spray = torch.linspace(0, 1, self.config['batch_size'], device=self.device)[:,None]
+        x = (max_points[:,:,0] - min_points[:,:,0]) * spray + min_points[:,:,0]
+        y = (min_points[:,:,1] - max_points[:,:,1])/(min_points[:,:,0]-max_points[:,:,0])*(x - min_points[:,:,0]) + min_points[:,:,1]
+        y = torch.where(torch.isnan(y), min_points[:,:,1], y)
+        
+        z = max_points[:,:,2].repeat((self.config['batch_size'],1))
+        sprayed_tensor = torch.stack((x,y,z),dim=2)
         
         #5. Call the channel gain function and obtain the Power and the Channel_Z values
         self.sionna.update_topology(tx_xyz_replicated, sprayed_tensor, scen_map, map_resolution=self.config['map_resolution'], direction=self.config['direction'], los_requested=los_requested)
         h_T, rx_pow = self.sionna.generate_channels()
         rx_pow_db = 10*torch.log10(rx_pow)
         h_T = h_T.to(self.device)
-        rx_pow_db = rx_pow_db.to(self.device).squeeze((2,4)) #128,n_rx,x_tx  
-
-        #8. Find the distance between the Tx and Rx
-        # totalDistance = torch.cdist(tx_xyz[:,:,0:2], sprayed_tensor[:,:,0:2], p=2).squeeze(1)
+        rx_pow_db = rx_pow_db.to(self.device).squeeze((2,4)) #batch_size,n_rx,x_tx 
         
-        #9. Take the PowerDB and filter it, and a form a smooth curve
-        # for i in range(Power.shape[1]):
-        #     filteredList.append(average_Filter(pad_op(Power[:,i,:].reshape(1,1,-1))))
-        # filtered_Power = torch.cat(filteredList, axis=1).permute(2,1,0)
+        # Take the PowerDB and filter it, and a form a smooth curve
         filtered_power_db = self.avg_filter(rx_pow_db.permute((2,1,0))).permute((2,1,0))
         
-        #10. Based on the filter output and using its size, clip the Tx and Rx tensors
-        # sprayedTensor_clipped = OptimizerHelper.clipTensor(sprayedReceiverTensorRx, filteredPowerDB)
-        # replicatedTxPoints_clipped = OptimizerHelper.clipTensor(replicatedTxPoints, filteredPowerDB)
-        
-        #Convert the PowerDB and FilteredPowerDB back to SNR for plotting puposes
+        # Convert the PowerDB and FilteredPowerDB back to SNR for plotting puposes
         filtered_snr_db = filtered_power_db - self.sionna.noise_power_db
         rx_snr_db = rx_pow_db - self.sionna.noise_power_db
         
-        #12. Plot the data if the flag is set
+        #Plot the data if the flag is set
         if self.config['debug']:
             clipped_dist = torch.cdist(tx_xyz_replicated[:,:,0:2], sprayed_tensor[:,:,0:2], p=2)
             self.plotSNRvsDist(filtered_snr_db, clipped_dist,rx_snr_db,clipped_dist)
         
         return filtered_power_db, sprayed_tensor
 
-    def _get_initial_guess(self, target_pow_linear, power_est_db, rx_xyz_sprayed):
+    def _get_initial_guess(self, target_pow_linear, power_est_db, rx_xyz, rx_xyz_sprayed):
         #Convert the FilterPower in DB to Linear Power i.e., Linear Space
         power_est_linear = 10**((power_est_db)/10) 
         
@@ -135,85 +131,60 @@ class ChannelGenerator:
         #The new check flag tells us whether we want to replicate the Power across the RxTower or distribute it
         if self.config['replicateSNR']:
             #Here the SNR maybe a single variable
-            #13. Using the targetPowerLinear value, find the closet possible value of the Power and determine the index, 
-            # use the index for finding the near Optimal Rx location
             target_pow_linear_perchan = target_pow_linear.repeat(self.config['n_rx'])
         else:
             #Here the powerGoalLinear maybe a single variable, However, we try to solve for total Power and distribute it across the Rx Towers
             #14. Using the powerGoalLinear value, find the closet possible value of the Power and determine the index, 
             # use the index for finding the near Optimal Rx location 
-                
-            # Scale the parameters between 1e6:1e-6
-            new_max, new_min = 1.0, 1e-6
-            scale = ((new_max - new_min) / (power_est_linear.max() - power_est_linear.min()))
-            scale_bias = new_min - power_est_linear.min() * scale
-
-            target_pow_range = 10**((10*torch.log10(target_pow_linear) + torch.tensor([-0.5, +0.5], device=self.device))/10)
-            target_pow_linear_perchan = self._glop_solver(target_pow_range*scale+scale_bias, power_est_linear*scale+scale_bias)
-            target_pow_linear_perchan = (target_pow_linear_perchan-scale_bias)/scale
             
-            # powerTensor = PowellSolver(minTensor, maxTensor, targetPower, numOfRxTowers, dev)
-            # if powerTensor is not None:
-            #     return (powerTensor / scaleTarget)
-            # else:
-            #     raise Exception("Optimization failed, neither of the solvers are able to converge")
+            target_pow_linear_perchan = self._simple_power_solver(power_est_linear, target_pow_linear, rx_xyz, rx_xyz_sprayed)
         
-        rms_errors = torch.sqrt((target_pow_linear_perchan[None,:,None] - power_est_linear)**2)
-        index = rms_errors.argmin(0)
-        nearOptimalRxLoc = torch.gather(rx_xyz_sprayed, 0, index[None].repeat((1,1,3)))
+        rms_errors = torch.sqrt((target_pow_linear_perchan - power_est_linear)**2)
+        index = rms_errors.argmin(0, keepdim=True)
+        rx_xyz = torch.gather(rx_xyz_sprayed, 0, index.repeat((1,1,3)))
 
-        return nearOptimalRxLoc
+        return rx_xyz
 
-    def _gen_matching_channels(self, ):
-        #4. Now replicate the nearoptimal Rx
-        replicatedRxLoc = nearOptimalRxLoc.repeat((batch_size,1,1))
+    def _gen_matching_channels(self, rx_xyz, tx_xyz, scen_map, target_pow_db, los_requested):
+        # Batch the locations for multi-test
+        tx_xyz_replicated = tx_xyz.repeat(self.config['batch_size'],1,1) 
+        rx_xyz_replicated = rx_xyz.repeat(self.config['batch_size'],1,1) 
+
         
-        #5. start a while loop
-        while(True):
-            #6. Call the channel gain function
-            self.sionna.update_topology(tx_xyz_replicated, sprayed_tensor, scen_map, map_resolution=self.config['map_resolution'], direction=self.config['direction'], los_requested=los_requested)
-            h_T, rx_pow = self.sionna.generate_channels()
-            rx_pow_db = 10*torch.log10(rx_pow)
+        # Try max_iters times to find solution
+        iteration_val = 0
+        while(iteration_val < self.config['max_iters']):
+            # Call the channel gain function
+            self.sionna.update_topology(tx_xyz_replicated, rx_xyz_replicated, scen_map, map_resolution=self.config['map_resolution'], direction=self.config['direction'], los_requested=los_requested)
+            h_T, rx_pow_linear = self.sionna.generate_channels()
             h_T = h_T.to(self.device)
-            rx_pow_db = rx_pow_db.to(self.device).squeeze((2,4)) #128,n_rx,x_tx  
+            rx_pow_linear = rx_pow_linear.to(self.device).squeeze((2,4)) #128,n_rx,x_tx  
             
-            #7. Reduce the dimensions of the PowerDB as per the dimension requirement and change to Linear Space
-            LinearPower = 10**((PowerDB.squeeze(-1,-2))/10)
-            
-            #8. Find the index of the closest value of the Power to the targetPowerLinear
-            if len(targetSNR) == 1:
-                smallest_value, index = OptimizerHelper.findMinSNRVal(LinearPower,targetPowerLinear)
-                nearOptimalPower = OptimizerHelper.getMinIndexVal(index, LinearPower)
-                if replicateSNR:    
-                    nearOptimalSNR = 10*torch.log10(nearOptimalPower) - scenario.noise_power_db
-                else:
-                    nearOptimalSNR = 10*torch.log10(nearOptimalPower.sum()) - scenario.noise_power_db
+            # Find the index of the closest value of the Power to the targetPowerLinear
+            if self.config['replicateSNR']:
+                # TODO: test this
+                rms_errors = torch.sqrt((target_pow_db - 10*torch.log10(rx_pow_linear))**2)
+                passing_idxs = torch.all(rms_errors < self.config['max_error'], (1,2))
             else:
-                smallest_value, index = OptimizerHelper.findMinSNRVal(LinearPower,targetPowerLinear)
-                nearOptimalPower = OptimizerHelper.getMinIndexVal(index, LinearPower)
-                nearOptimalSNR = (10*torch.log10(nearOptimalPower) - scenario.noise_power_db).view(1,-1)
+                total_pow_db = 10*torch.log10(torch.sum(rx_pow_linear, (1,2)))
+                rms_errors = torch.sqrt((target_pow_db - total_pow_db)**2)
+                passing_idxs = (rms_errors < self.config['max_error']).nonzero()
             
-            #9. Use the index to determine the optimal SNR values
-            nearOptimalChannel_Z = OptimizerHelper.getMinIndexVal(index, channel_Z)
-            smallest_value, index = OptimizerHelper.findMinSNRVal(nearOptimalSNR.squeeze(),targetSNR)
-            
-            if debugMode: print("Current iter: ",iteration_val)
-            if debugMode: print("Current small value: ",smallest_value.squeeze().tolist())
-            
-            if (smallest_value <= errorPercentage).all():
+            if len(passing_idxs):
+                idx = passing_idxs[0]
+                if self.config['debug']: 
+                    print('The Target is found!!')
+                    print("The near Optimal Rx locations are: ", rx_xyz[idx])
+                    # print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
+                    print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[idx]))
+                return h_T[idx], rx_xyz
+            else:
+                if self.config['debug']: 
+                    print("Current iter: ", iteration_val)
+                    print("Current small value: ", rms_errors.min().itme())
+                iteration_val += 1
 
-                target_Found = True
-                if debugMode: print('The Target is found!!')
-                if debugMode: print("The near Optimal Rx locations are: ", nearOptimalRxLoc)
-                if debugMode: print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
-                if debugMode: print("The near Optimal SNRs are: ", nearOptimalSNR)
-                
-                return target_Found, nearOptimalRxLoc, nearOptimalChannel_Z, nearOptimalSNR
-            
-            if iteration_val == iteration_Controller:
-                return target_Found, None, None, None
-            
-            iteration_val += 1
+        assert False, "max_iters reached without solution"            
 
     def  _get_poi(self, mapBoundaryA, mapBoundaryB, txLoc, outPostLoc):
         Det = ((outPostLoc[:,:,1] - txLoc[:,:,1]) * (mapBoundaryB[:,:,0] - mapBoundaryA[:,:,0]) - 
@@ -273,6 +244,41 @@ class ChannelGenerator:
         for i, var in enumerate(variables):
             newPowerTensor[i] = var.solution_value()
         return newPowerTensor
+
+    def _simple_power_solver(self, powerLinear, targetPower, rxLoc, sprayedRx):
+        # first get initial state power and delta
+        index = torch.cdist(sprayedRx[...,None,:2],rxLoc[...,None,:2],p=2).argmin(0)
+        currentRxPow = torch.gather(powerLinear,0,index.reshape(1,-1,1))
+        delta = targetPower - torch.sum(currentRxPow)
+        
+        # Set direction to move in
+        if delta < 0:
+            ltgt = torch.lt
+            boundaryTensor = powerLinear.min(dim=0, keepdim = True)[0]
+            _, sortedInd = torch.sort(currentRxPow.squeeze(),descending=True)
+        else:
+            ltgt = torch.gt
+            boundaryTensor = powerLinear.max(dim=0, keepdim = True)[0]
+            _, sortedInd = torch.sort(currentRxPow.squeeze())
+
+        currentIndex = 0
+        part = 0.45
+        while True:
+            currentRxPow[:,sortedInd[currentIndex]] = currentRxPow[:,sortedInd[currentIndex]] + delta * (part)
+            delta = delta * (1 - part)
+            if abs(delta) < 1e-20:
+                return currentRxPow
+            else:
+                if ltgt(currentRxPow[:,sortedInd[currentIndex]], boundaryTensor[0,sortedInd[currentIndex]]):
+                    delta = currentRxPow[:,sortedInd[currentIndex]] - boundaryTensor[0,sortedInd[currentIndex]] + delta
+                    currentRxPow[:,sortedInd[currentIndex]] = boundaryTensor[0,sortedInd[currentIndex]]
+                currentIndex += 1
+                if currentIndex == currentRxPow.shape[1]:
+                    currentIndex = 0
+                    if (currentRxPow == boundaryTensor).all():    
+                        return currentRxPow
+                    
+        assert False, "Requested power impossible"
             
 
     def plotSNRvsDist(self, filteredSNR, dist1, unfilteredSNR, dist2):
