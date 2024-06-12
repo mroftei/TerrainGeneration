@@ -170,7 +170,7 @@ def channelGainCalc(txLocations,
     #We will convert the power to Power DB, this is to ensure the filter can operate
     PowerDB = 10*torch.log10(rx_pow)
 
-    return z, PowerDB
+    return z.to(txLocations.device).clone(), PowerDB.to(txLocations.device).clone()
 
 """
 Power: a tensor which needs to be filtered

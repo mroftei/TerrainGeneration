@@ -32,7 +32,8 @@ class ChannelGenerator:
         self.config = locals()
         self.device = device
 
-        self.sionna = SionnaScenario(n_bs=n_rx, n_ut=n_tx, batch_size=batch_size, n_time_samples=frame_size, f_c=f_c, bw=bw, noise_power_dB=noise_power_dB, seed=seed, dtype=dtype.to_complex(), device=device)
+        self.sionna_dev = torch.device('cuda:0')
+        self.sionna = SionnaScenario(n_bs=n_rx, n_ut=n_tx, batch_size=batch_size, n_time_samples=frame_size, f_c=f_c, bw=bw, noise_power_dB=noise_power_dB, seed=seed, dtype=dtype.to_complex(), device=self.sionna_dev)
         self.avg_filter = torch.nn.Sequential(
             torch.nn.ReplicationPad1d(27//2),
             torch.nn.AvgPool1d(kernel_size=27, stride=1)
@@ -104,7 +105,7 @@ class ChannelGenerator:
         #5. Call the channel gain function and obtain the Power and the Channel_Z values
         self.sionna.update_topology(tx_xyz_replicated, sprayed_tensor, scen_map, map_resolution=self.config['map_resolution'], direction=self.config['direction'], los_requested=los_requested)
         h_T, rx_pow = self.sionna.generate_channels()
-        rx_pow_db = 10*torch.log10(rx_pow)
+        rx_pow_db = 10*torch.log10(rx_pow).to(self.device)
         h_T = h_T.to(self.device)
         rx_pow_db = rx_pow_db.to(self.device).squeeze((2,4)) #batch_size,n_rx,x_tx 
         
@@ -129,9 +130,9 @@ class ChannelGenerator:
         assert target_pow_linear > torch.sum(power_est_linear.min(0)[0]), "The TargetPower is not in the feasible SNR region of the Rx Towers"
         
         #The new check flag tells us whether we want to replicate the Power across the RxTower or distribute it
-        if self.config['replicateSNR']:
+        if self.config['replicateSNR'] or self.config['n_rx'] == 1:
             #Here the SNR maybe a single variable
-            target_pow_linear_perchan = target_pow_linear.repeat(self.config['n_rx'])
+            target_pow_linear_perchan = target_pow_linear.repeat(self.config['n_rx'])[None,:,None]
         else:
             #Here the powerGoalLinear maybe a single variable, However, we try to solve for total Power and distribute it across the Rx Towers
             #14. Using the powerGoalLinear value, find the closet possible value of the Power and determine the index, 
@@ -164,7 +165,7 @@ class ChannelGenerator:
             if self.config['replicateSNR']:
                 # TODO: test this
                 rms_errors = torch.sqrt((target_pow_db - 10*torch.log10(rx_pow_linear))**2)
-                passing_idxs = torch.all(rms_errors < self.config['max_error'], (1,2))
+                passing_idxs = torch.all(rms_errors < self.config['max_error'], (1,2)).nonzero()
             else:
                 total_pow_db = 10*torch.log10(torch.sum(rx_pow_linear, (1,2)))
                 rms_errors = torch.sqrt((target_pow_db - total_pow_db)**2)
