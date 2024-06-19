@@ -32,7 +32,7 @@ class ScenarioGenerator:
         n_workers=1,
         max_iter=5,
         optimizer_error = 0.5,
-        replicateSNR = True,
+        target_total_p = True,
         dtype=torch.float32,
         device: Optional[torch.device] = None,
         debug = False
@@ -54,7 +54,7 @@ class ScenarioGenerator:
         self._dtype = dtype
         self._debug = debug
         self.max_iter = max_iter
-        self.replicateSNR = replicateSNR
+        self.target_total_p = target_total_p
         self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         # data type
@@ -70,7 +70,7 @@ class ScenarioGenerator:
             bw = bw,
             noise_power_dB = noise_power_dB,
             direction = "uplink",
-            replicateSNR = replicateSNR,
+            target_total_p = target_total_p,
             minDist = min_receiver_dist,
             batch_size = batch_size,
             max_iters = max_iter,

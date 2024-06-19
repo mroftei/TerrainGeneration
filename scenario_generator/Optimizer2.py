@@ -17,7 +17,7 @@ class ChannelGenerator:
         bw = 30e3,
         noise_power_dB = None,
         direction = "uplink",
-        replicateSNR = False,
+        target_total_p = False,
         minDist = 1,
         batch_size = 128,
         max_iters = 10,
@@ -127,19 +127,16 @@ class ChannelGenerator:
         #Convert the FilterPower in DB to Linear Power i.e., Linear Space
         power_est_linear = 10**((power_est_db)/10) 
         
-        assert target_pow_linear > torch.sum(power_est_linear.min(0)[0]), "The TargetPower is not in the feasible SNR region of the Rx Towers"
         
         #The new check flag tells us whether we want to replicate the Power across the RxTower or distribute it
-        if self.config['replicateSNR'] or self.config['n_rx'] == 1:
-            #Here the SNR maybe a single variable
-            target_pow_linear_perchan = target_pow_linear.repeat(self.config['n_rx'])[None,:,None]
-        else:
-            #Here the powerGoalLinear maybe a single variable, However, we try to solve for total Power and distribute it across the Rx Towers
-            #14. Using the powerGoalLinear value, find the closet possible value of the Power and determine the index, 
-            # use the index for finding the near Optimal Rx location 
-            
+        if self.config['target_total_p']:
+            assert len(target_pow_linear) == 1, "target_total_p=True only accepts a single target value"
+            assert target_pow_linear > torch.sum(power_est_linear.min(0)[0]), "The TargetPower is not in the feasible SNR region of the Rx Towers"
             target_pow_linear_perchan = self._simple_power_solver(power_est_linear, target_pow_linear, rx_xyz, rx_xyz_sprayed)
-        
+        else: 
+            assert len(target_pow_linear) == self.config['n_rx'] , "Target SNR wrong shape"
+            target_pow_linear_perchan = target_pow_linear[None,:,None]
+            
         rms_errors = torch.sqrt((target_pow_linear_perchan - power_est_linear)**2)
         index = rms_errors.argmin(0, keepdim=True)
         rx_xyz = torch.gather(rx_xyz_sprayed, 0, index.repeat((1,1,3)))
@@ -162,23 +159,25 @@ class ChannelGenerator:
             rx_pow_linear = rx_pow_linear.to(self.device).squeeze((2,4)) #128,n_rx,x_tx  
             
             # Find the index of the closest value of the Power to the targetPowerLinear
-            if self.config['replicateSNR']:
-                # TODO: test this
-                rms_errors = torch.sqrt((target_pow_db - 10*torch.log10(rx_pow_linear))**2)
-                passing_idxs = torch.all(rms_errors < self.config['max_error'], (1,2)).nonzero()
-            else:
+            if self.config['target_total_p']:
                 total_pow_db = 10*torch.log10(torch.sum(rx_pow_linear, (1,2)))
                 rms_errors = torch.sqrt((target_pow_db - total_pow_db)**2)
-                passing_idxs = (rms_errors < self.config['max_error']).nonzero()
+                fitting, passing_idx = torch.max((rms_errors < self.config['max_error']).int(), 0)
+                fitting = fitting.bool()
+            else:
+                # Take first BS for each channel that meets requirements. We can do this since BSs are uncorrelated.
+                rms_errors = torch.sqrt((target_pow_db[None,:,None] - 10*torch.log10(rx_pow_linear))**2)
+                fitting, passing_idx = torch.max((rms_errors < self.config['max_error']).int(), 0)
+                passing_idx = passing_idx.flatten()
+                fitting = fitting.bool()
             
-            if len(passing_idxs):
-                idx = passing_idxs[0]
+            if torch.all(fitting):
                 if self.config['debug']: 
                     print('The Target is found!!')
-                    print("The near Optimal Rx locations are: ", rx_xyz[idx])
+                    print("The near Optimal Rx locations are: ", rx_xyz[passing_idx])
                     # print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
-                    print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[idx]))
-                return h_T[idx], rx_xyz
+                    print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[passing_idx]))
+                return h_T[passing_idx, torch.arange(h_T.shape[1])][None], rx_xyz
             else:
                 if self.config['debug']: 
                     print("Current iter: ", iteration_val)
@@ -256,11 +255,11 @@ class ChannelGenerator:
         if delta < 0:
             ltgt = torch.lt
             boundaryTensor = powerLinear.min(dim=0, keepdim = True)[0]
-            _, sortedInd = torch.sort(currentRxPow.squeeze(),descending=True)
+            _, sortedInd = torch.sort(currentRxPow.flatten(),descending=True)
         else:
             ltgt = torch.gt
             boundaryTensor = powerLinear.max(dim=0, keepdim = True)[0]
-            _, sortedInd = torch.sort(currentRxPow.squeeze())
+            _, sortedInd = torch.sort(currentRxPow.flatten())
 
         currentIndex = 0
         part = 0.45
