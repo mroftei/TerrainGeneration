@@ -252,34 +252,20 @@ class ChannelGenerator:
         delta = targetPower - torch.sum(currentRxPow)
         
         # Set direction to move in
-        if delta < 0:
-            ltgt = torch.lt
+        if delta < 0: #Here the delta will be negative
+            #move away from Tx
             boundaryTensor = powerLinear.min(dim=0, keepdim = True)[0]
-            _, sortedInd = torch.sort(currentRxPow.flatten(),descending=True)
-        else:
-            ltgt = torch.gt
+        elif delta > 0: #Here the delta will be positive
+            #Bring closer to Tx
             boundaryTensor = powerLinear.max(dim=0, keepdim = True)[0]
-            _, sortedInd = torch.sort(currentRxPow.flatten())
-
-        currentIndex = 0
-        part = 0.45
-        while True:
-            currentRxPow[:,sortedInd[currentIndex]] = currentRxPow[:,sortedInd[currentIndex]] + delta * (part)
-            delta = delta * (1 - part)
-            if abs(delta) < 1e-20:
-                return currentRxPow
-            else:
-                if ltgt(currentRxPow[:,sortedInd[currentIndex]], boundaryTensor[0,sortedInd[currentIndex]]):
-                    delta = currentRxPow[:,sortedInd[currentIndex]] - boundaryTensor[0,sortedInd[currentIndex]] + delta
-                    currentRxPow[:,sortedInd[currentIndex]] = boundaryTensor[0,sortedInd[currentIndex]]
-                currentIndex += 1
-                if currentIndex == currentRxPow.shape[1]:
-                    currentIndex = 0
-                    if (currentRxPow == boundaryTensor).all():    
-                        return currentRxPow
-                    
-        assert False, "Requested power impossible"
-            
+        
+        powerCapacity = torch.sum(torch.abs(currentRxPow - boundaryTensor))
+        if torch.abs(delta)/powerCapacity > 1.0:
+            return boundaryTensor
+        else:
+            shareRate = torch.abs(currentRxPow - boundaryTensor)/powerCapacity
+            currentRxPow = currentRxPow + (shareRate * delta)
+            return currentRxPow    
 
     def plotSNRvsDist(self, filteredSNR, dist1, unfilteredSNR, dist2):
         for i in range(dist1.shape[1]):
