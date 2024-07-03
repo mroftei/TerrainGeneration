@@ -96,4 +96,14 @@ setup(
     project_urls={  # Optional
         "Source": "https://github.com/mroftei/TerrainGeneration",
     },
+    install_requires=[
+        'matplotlib',
+        'scipy',
+        'numpy',
+        'pandas',
+        'ortools',
+        'matplotlib-label-lines',
+        'pyfastnoisesimd @ git+https://github.com/robbmcleod/pyfastnoisesimd.git@v0.4.3',
+        'sionna_torch @ git+https://github.com/mroftei/SionnaTorch.git@v0.3',
+    ],
 )
