@@ -6,11 +6,9 @@ from matplotlib.lines import Line2D
 import numpy as np
 import torch
 import itertools
-from sionna_torch import SionnaScenario
 
 from .MapGenerator import MapGenerator, TerrainType
-# from .Optimizer import OptimalSolution
-from .Optimizer2 import ChannelGenerator
+from .Optimizer import ChannelGenerator
 
 
 class ScenarioGenerator:
