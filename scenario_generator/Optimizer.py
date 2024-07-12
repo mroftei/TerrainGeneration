@@ -268,13 +268,16 @@ class ChannelGenerator:
             return currentRxPow    
 
     def plotSNRvsDist(self, filteredSNR, dist1, unfilteredSNR, dist2):
-        for i in range(dist1.shape[1]):
+        for i in range(dist1.shape[2]):
             fig = plt.figure(figsize=(8,8))
             fSNRindividual = filteredSNR[:,i,:].squeeze().tolist()
             unfSNRindividual = unfilteredSNR[:,i,:].squeeze().tolist()
-            d_clipped = dist1[:,i].tolist()
-            d_unclipped = dist2[:,i].tolist()
+            d_clipped = dist1[:,:,i].tolist()
+            d_unclipped = dist2[:,:,i].tolist()
             
-            plt.plot(d_unclipped,unfSNRindividual)
-            plt.plot(d_clipped,fSNRindividual)
-            plt.savefig(f"plt1_{i}.jpg")
+            plt.plot(d_unclipped,unfSNRindividual, label='Unfiltered SNR')
+            plt.plot(d_clipped,fSNRindividual, label='Filtered SNR')
+            plt.legend()
+            plt.xlabel("Distance (meters)", fontsize = 12)
+            plt.ylabel("SNR [dB]", fontsize = 12)
+            plt.savefig(f"DistVsSNRplt1_{i}.jpg")
