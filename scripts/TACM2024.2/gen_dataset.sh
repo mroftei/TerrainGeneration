@@ -1,0 +1,10 @@
+sbatch --mem=250GB gen_dataset.sbatch --nrx 8 --scen a
+sbatch --mem=250GB gen_dataset.sbatch --nrx 8 --scen e
+sbatch --mem=250GB gen_dataset.sbatch --nrx 8 --scen d
+sbatch --mem=150GB gen_dataset.sbatch --nrx 4 --scen a
+sbatch --mem=150GB gen_dataset.sbatch --nrx 4 --scen d
+sbatch --mem=150GB gen_dataset.sbatch --nrx 4 --scen e
+sbatch --mem=75GB gen_dataset.sbatch --nrx 2 --scen a
+sbatch --mem=75GB gen_dataset.sbatch --nrx 2 --scen d
+sbatch --mem=75GB gen_dataset.sbatch --nrx 2 --scen e
+sbatch --mem=64GB gen_dataset.sbatch --nrx 1 --scen a

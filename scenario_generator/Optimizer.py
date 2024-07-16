@@ -44,17 +44,16 @@ class ChannelGenerator:
         scenario_map,
         tx_xyz,
         rx_xyz,
-        target_snr,
+        target_pow_db,
         los_requested = False,
         *args: Any, 
         **kwds: Any
     ) -> Any:
         assert tx_xyz.shape[0] == 1 and tx_xyz.shape[1] == self.config['n_tx'], "Tx shape incorrect"
         assert rx_xyz.shape[0] == 1 and rx_xyz.shape[1] == self.config['n_rx'], "Rx shape incorrect"
-        assert rx_xyz.shape[1] == len(target_snr) or len(target_snr) == 1, "Length of target_snr must be either 1 or number of receivers sent"
+        assert rx_xyz.shape[1] == len(target_pow_db) or len(target_pow_db) == 1, "Length of target_pow_db must be either 1 or number of receivers sent"
 
         # Convert target to required forms
-        target_pow_db = target_snr + self.sionna.noise_power_db
         target_pow_linear = 10**(target_pow_db/10) #SNR in dB to PowerGoal Linear Space
 
         # Estimate the channel gain along each path
@@ -68,6 +67,8 @@ class ChannelGenerator:
         
         return h_T, rx_xyz
         
+    def get_noise_power(self):
+        return self.sionna.noise_power_db
 
     def _estimate_path_gain(self, tx_xyz, rx_xyz, scen_map, los_requested):
         map_size = scen_map.shape[0]
@@ -174,9 +175,9 @@ class ChannelGenerator:
             if torch.all(fitting):
                 if self.config['debug']: 
                     print('The Target is found!!')
-                    print("The near Optimal Rx locations are: ", rx_xyz[passing_idx])
+                    print("The near Optimal Rx locations are: ", rx_xyz)
                     # print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
-                    print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[passing_idx]))
+                    print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[passing_idx, torch.arange(h_T.shape[1])]))
                 return h_T[passing_idx, torch.arange(h_T.shape[1])][None], rx_xyz
             else:
                 if self.config['debug']: 

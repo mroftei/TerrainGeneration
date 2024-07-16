@@ -1,14 +1,15 @@
-
-# import os
-# os.environ['CUDA_LAUNCH_BLOCKING'] = "1" 
+import sys
+sys.path.insert(1, ".")
+sys.path.insert(2, "../..")
 import h5py
 import torch
 from tqdm import tqdm
 from scenario_generator import ScenarioGenerator
 from argparse import ArgumentParser
+import numpy as np
 
 parser = ArgumentParser()
-parser.add_argument("--nrx", type=int, default=2)
+parser.add_argument("--nrx", type=int, default=8)
 parser.add_argument("--scen", type=str, default="a")
 args = parser.parse_args()
 
@@ -92,10 +93,15 @@ for i in tqdm(range(0, len(x), batch_size), miniters=100, mininterval=10):
 
     target_snr = target_snr.uniform_(snr_min, snr_max, generator=snr_gen)
     if args.scen == "d":
-        target_snr[:] = 10*torch.log10(10**(target_snr[0]/10)/n_rx)
-
-    h_t = scenario_gen.RegenerateFullScenario(target_snr)
-    z, rx_pow_db, snr1 = scenario_gen.chan_gen.sionna.apply_channels(x[i:i+batch_size,:1,None].to(scenario_gen.chan_gen.sionna.device), h_t.to(scenario_gen.chan_gen.sionna.device))
+        target_power = target_snr + 10*np.log10((10**(scenario_gen.chan_gen.get_noise_power()/10))*n_rx)
+        target_power[:] = 10*torch.log10((10**(target_power[0]/10))/n_rx)
+    elif args.scen == "e":
+        target_power = target_snr + 10*np.log10((10**(scenario_gen.chan_gen.get_noise_power()/10))*n_rx)
+    else:
+        target_power = target_snr + scenario_gen.chan_gen.get_noise_power()
+        
+    h_t = scenario_gen.RegenerateFullScenario(target_power)
+    z, rx_pow_db, snr1 = scenario_gen.chan_gen.sionna.apply_channels(x[i:i+batch_size,:1,None].to(scenario_gen.chan_gen.sionna.device), h_t.to(scenario_gen.chan_gen.sionna.device), None)
 
     # bw_inband = ((1/T_s[i:i+batch_size])*(1+beta[i:i+batch_size]))[:,None,None].to(dev)
     # snr1 -= 10*torch.log10(bw_inband) # inband snr
@@ -110,7 +116,7 @@ for i in tqdm(range(0, len(x), batch_size), miniters=100, mininterval=10):
 
     p_total_dbm = 10*torch.log10(torch.sum(10**(rx_pow_db.flatten(1)/10), 1))
     p_noise_dbm = rx_pow_db - snr1
-    snr_total = p_total_dbm - (10*torch.log10(10**(p_noise_dbm/10).mean((1,2))))
+    snr_total = p_total_dbm - (10*torch.log10((10**(p_noise_dbm/10)).sum((1,2))))
     bw = 10*torch.log10((1/T_s[i:i+batch_size])*(1+beta[i:i+batch_size]))
     snr1_inband = snr1.cpu() - bw[:,None,None]
     snr_total_inband = snr_total.cpu() - bw # inband snr

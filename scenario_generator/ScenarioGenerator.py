@@ -80,7 +80,7 @@ class ScenarioGenerator:
 
         )
 
-    def RegenerateFullScenario(self, target_snr=None):
+    def RegenerateFullScenario(self, target_pow_db=None):
         map_diagonal = np.sqrt(np.sum(np.power(self.map_size, 2)))
         if self.min_receiver_dist > map_diagonal:
             raise Exception("Invalid min receiver distance and map size specified")
@@ -89,13 +89,13 @@ class ScenarioGenerator:
         
         self._create_nodes()
         
-        if target_snr is not None:
+        if target_pow_db is not None:
             iter_control = 0
-            target_snr = target_snr.to(self.device)
+            target_pow_db = target_pow_db.to(self.device)
             while(True):
                 iter_control += 1
                 try:
-                    h_T, self.receivers = self.chan_gen(self.map, self.transmitters, self.receivers, target_snr, los_requested=False)
+                    h_T, self.receivers = self.chan_gen(self.map, self.transmitters, self.receivers, target_pow_db, los_requested=False)
                     return h_T
                 except AssertionError as e:
                     if self._debug: print(e)
