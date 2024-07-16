@@ -79,7 +79,6 @@ class ChannelGenerator:
         min_points = torch.cat((((1 - distance_ratio) * tx_xyz[:,:,:2] + distance_ratio * rx_xyz[:,:,:2]), 
                                 (rx_xyz[:,:,2:])), dim = 2)
         
-        # TODO: make this dumber and faster by just taking closest point to boundary and still inside
         #2. Find the Outpost point by extending the line between the Tx and Rx beyond its original length
         extended_distance = (float(map_size)/100.0) * distance_path + distance_path
         distance_ratio = (extended_distance/distance_path).reshape(1,-1,1)
@@ -87,11 +86,9 @@ class ChannelGenerator:
                                 (rx_xyz[:,:,2:])), dim = 2)
         
         #3. Now verify if those new endpoints lie within the boundary of the map
-        map_boundary = torch.tensor([[[0,0],[map_size-1,0],[map_size-1,map_size-1],[0,map_size-1]]], device=self.device)
-        for i in range(map_boundary.shape[1]):
-            boundaryPointA  = map_boundary[:,i].reshape(1,1,-1)
-            boundaryPointB = map_boundary[:,(i + 1) % map_boundary.shape[1]].reshape(1,1,-1)
-            max_points = self._get_poi(boundaryPointA,boundaryPointB,tx_xyz,max_points)
+        map_boundaryA = torch.tensor([[[0,0],[map_size-1,0],[map_size-1,map_size-1],[0,map_size-1]]], device=self.device)
+        map_boundaryB = torch.cat((map_boundaryA[:, 1:], map_boundaryA[:, :1]), dim=1)
+        max_points = self._get_poi(map_boundaryA,map_boundaryB,tx_xyz,max_points)
         
         #4. Spray the points between the min and Max Rx locations based on resolutions
         tx_xyz_replicated = tx_xyz.repeat(self.config['batch_size'],1,1) 
@@ -176,45 +173,47 @@ class ChannelGenerator:
                 if self.config['debug']: 
                     print('The Target is found!!')
                     print("The near Optimal Rx locations are: ", rx_xyz)
-                    # print("The near Optimal Channel_Z are: ", nearOptimalChannel_Z)
                     print("The near Optimal SNRs are: ", 10*torch.log10(rx_pow_linear[passing_idx, torch.arange(h_T.shape[1])]))
                 return h_T[passing_idx, torch.arange(h_T.shape[1])][None], rx_xyz
             else:
                 if self.config['debug']: 
                     print("Current iter: ", iteration_val)
-                    print("Current small value: ", rms_errors.min().itme())
+                    print("Current small value: ", rms_errors.min(0).values)
                 iteration_val += 1
 
         assert False, "max_iters reached without solution"            
 
+    ###############      (x1,y1)        (x2,y2)    (x3,y3)  (x4,y4) ####################
     def  _get_poi(self, mapBoundaryA, mapBoundaryB, txLoc, outPostLoc):
-        Det = ((outPostLoc[:,:,1] - txLoc[:,:,1]) * (mapBoundaryB[:,:,0] - mapBoundaryA[:,:,0]) - 
-            (outPostLoc[:,:,0] - txLoc[:,:,0]) * (mapBoundaryB[:,:,1] - mapBoundaryA[:,:,1]))
-        
-        nonZeroIndices = (Det == 0)
-        Det[nonZeroIndices] += torch.finfo(torch.float64).eps
-        
-        t = ((outPostLoc[:,:,0] - txLoc[:,:,0])*(mapBoundaryA[:,:,1]-txLoc[:,:,1]) - 
-            (outPostLoc[:,:,1] - txLoc[:,:,1])*(mapBoundaryA[:,:,0]-txLoc[:,:,0]))/Det
-        
-        tIndex = ((t > 0) & (t < 1))
-        
-        u = ((mapBoundaryB[:,:,0] - mapBoundaryA[:,:,0])*(mapBoundaryA[:,:,1]-txLoc[:,:,1]) - 
-            (mapBoundaryB[:,:,1] - mapBoundaryA[:,:,1])*(mapBoundaryA[:,:,0]-txLoc[:,:,0]))/Det
-        
-        uIndex = ((u > 0) & (u < 1))
-        
-        completeIndex = (tIndex & uIndex)
 
-        x = mapBoundaryA[:,:,0] + t * (mapBoundaryB[:,:,0] - mapBoundaryA[:,:,0])
-        y = mapBoundaryA[:,:,1] + t * (mapBoundaryB[:,:,1] - mapBoundaryA[:,:,1])
-        z = outPostLoc[:,:,2]
-        newPoints = torch.stack((x,y,z),dim=2)
-        
-        outPostLoc[completeIndex] = newPoints[completeIndex]
-        
-        return outPostLoc
+        x1y1_x2y2 = mapBoundaryA - mapBoundaryB
+        x1y1_x3y3 = mapBoundaryA - txLoc[...,:2]
+        x3y3_x4y4 = txLoc[...,:2] - outPostLoc[...,:2]
 
+        x1_x2 = x1y1_x2y2[...,0].flatten()
+        y1_y2 = x1y1_x2y2[...,1].flatten()
+        
+        x1_x3 = x1y1_x3y3[...,0].flatten()
+        y1_y3 = x1y1_x3y3[...,1].flatten()
+
+        x3_x4 = x3y3_x4y4[...,0].flatten()
+        y3_y4 = x3y3_x4y4[...,1].flatten()
+
+        Det = torch.outer(x1_x2,y3_y4) - torch.outer(y1_y2,x3_x4)
+        Det += torch.finfo(torch.float64).eps
+        
+        t = (torch.outer(x1_x3,y3_y4) - torch.outer(y1_y3,x3_x4))/Det
+        u = ((y1_y2 * x1_x3) - (x1_x2 * y1_y3))[:,None]/Det
+
+        completeIndex = (((t > 0) & (t < 1)) & ((u > 0) & (u < 1)))
+        
+        x = mapBoundaryA[...,0].T + t * (-1.0 * x1_x2)[:,None]
+        y = mapBoundaryA[...,1].T + t * (-1.0 * y1_y2)[:,None]
+        z = outPostLoc[...,2]
+        newPoints = torch.stack((x,y),dim=2)
+        
+        return torch.cat((newPoints[completeIndex], z.T), dim=1)[None,:]
+    
     def _glop_solver(self, target_power_range, power_est_linear):
         newPowerTensor = torch.zeros(power_est_linear.shape[1], device=self.device)
         LPSolver = pywraplp.Solver.CreateSolver("GLOP")
