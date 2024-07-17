@@ -2,6 +2,7 @@ from typing import Any
 import torch
 import matplotlib.pyplot as plt
 from sionna_torch import SionnaScenario
+import math
 
 from ortools.linear_solver import pywraplp
 
@@ -80,7 +81,7 @@ class ChannelGenerator:
                                 (rx_xyz[:,:,2:])), dim = 2)
         
         #2. Find the Outpost point by extending the line between the Tx and Rx beyond its original length
-        extended_distance = (float(map_size)/100.0) * distance_path + distance_path
+        extended_distance = math.sqrt(2*(map_size)**2) + distance_path
         distance_ratio = (extended_distance/distance_path).reshape(1,-1,1)
         max_points = torch.cat((((1 - distance_ratio) * tx_xyz[:,:,:2] + distance_ratio * rx_xyz[:,:,:2]), 
                                 (rx_xyz[:,:,2:])), dim = 2)
@@ -212,7 +213,11 @@ class ChannelGenerator:
         z = outPostLoc[...,2]
         newPoints = torch.stack((x,y),dim=2)
         
-        return torch.cat((newPoints[completeIndex], z.T), dim=1)[None,:]
+        #this is for an edge case where the line may intersect with multiple edges, 
+        #for example, a diagonal line
+        _, passing_idx = torch.max(completeIndex, 0)
+
+        return torch.cat((newPoints[passing_idx, torch.arange(outPostLoc.shape[1])], z.T), dim=1)[None,:]
     
     def _glop_solver(self, target_power_range, power_est_linear):
         newPowerTensor = torch.zeros(power_est_linear.shape[1], device=self.device)
