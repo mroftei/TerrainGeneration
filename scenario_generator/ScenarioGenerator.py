@@ -28,6 +28,7 @@ class ScenarioGenerator:
         noise_power_dB = None,
         seed=42,
         n_workers=1,
+        noise_type='perlin',
         max_iter=5,
         optimizer_error = 0.5,
         target_total_p = True,
@@ -53,7 +54,7 @@ class ScenarioGenerator:
         self._debug = debug
         self.max_iter = max_iter
         self.target_total_p = target_total_p
-        self.map_gen = MapGenerator(map_size, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
+        self.map_gen = MapGenerator(map_size, noise_type=noise_type, n_workers=n_workers, seed=seed, dtype=dtype, device=device)
 
         # data type
         assert not dtype.is_complex, "'dtype' must be complex type"

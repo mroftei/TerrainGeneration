@@ -58,7 +58,7 @@ signal_scale_linear = torch.sqrt((target_snr_linear) / signal_power)
 x = x * signal_scale_linear
 
 print("Generating Channels")
-map_size = 1000
+map_size = 1024
 map_res = 20
 scenario_gen = ScenarioGenerator(n_receivers=n_rx, 
                                  batch_size=256, 
@@ -69,6 +69,7 @@ scenario_gen = ScenarioGenerator(n_receivers=n_rx,
                                  frame_size=1024,
                                  f_c=900e6,
                                  bw=30e3,
+                                 noise_type='perlin',
                                  seed=42,
                                  target_total_p=True if args.scen == "e" else False, 
                                  dtype=x.dtype.to_real(), 
