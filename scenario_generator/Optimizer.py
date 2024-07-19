@@ -75,16 +75,16 @@ class ChannelGenerator:
         map_size = scen_map.shape[0]
         
         #1. First find the minimum location of the receiver
-        distance_path = torch.cdist(tx_xyz, rx_xyz, p=2)
+        distance_path = torch.cdist(tx_xyz[...,:2], rx_xyz[...,:2], p=2)
         distance_ratio = (self.config['minDist']/distance_path).reshape(1,-1,1)
-        min_points = torch.cat((((1 - distance_ratio) * tx_xyz[:,:,:2] + distance_ratio * rx_xyz[:,:,:2]), 
-                                (rx_xyz[:,:,2:])), dim = 2)
+        min_points = torch.cat((((1 - distance_ratio) * tx_xyz[...,:2] + distance_ratio * rx_xyz[...,:2]), 
+                                (rx_xyz[...,2:])), dim = 2)
         
         #2. Find the Outpost point by extending the line between the Tx and Rx beyond its original length
-        extended_distance = 2 * math.sqrt(2*(map_size)**2) + distance_path
+        extended_distance = math.sqrt(2*(map_size)**2) + distance_path
         distance_ratio = (extended_distance/distance_path).reshape(1,-1,1)
-        max_points = torch.cat((((1 - distance_ratio) * tx_xyz[:,:,:2] + distance_ratio * rx_xyz[:,:,:2]), 
-                                (rx_xyz[:,:,2:])), dim = 2)
+        max_points = torch.cat((((1.0 - distance_ratio) * tx_xyz[...,:2] + distance_ratio * rx_xyz[...,:2]), 
+                                (rx_xyz[...,2:])), dim = 2)
         
         #3. Now verify if those new endpoints lie within the boundary of the map
         map_boundaryA = torch.tensor([[[0,0],[map_size-1,0],[map_size-1,map_size-1],[0,map_size-1]]], device=self.device)
