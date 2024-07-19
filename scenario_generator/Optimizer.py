@@ -96,7 +96,8 @@ class ChannelGenerator:
         spray = torch.linspace(0, 1, self.config['batch_size'], device=self.device)[:,None]
         x = (max_points[:,:,0] - min_points[:,:,0]) * spray + min_points[:,:,0]
         y = (min_points[:,:,1] - max_points[:,:,1])/(min_points[:,:,0]-max_points[:,:,0])*(x - min_points[:,:,0]) + min_points[:,:,1]
-        y = torch.where(torch.isnan(y), min_points[:,:,1], y)
+        y_vertical = (max_points[:,:,1] - min_points[:,:,1]) * spray + min_points[:,:,1]
+        y = torch.where(torch.isnan(y), y_vertical, y)
         
         z = max_points[:,:,2].repeat((self.config['batch_size'],1))
         sprayed_tensor = torch.stack((x,y,z),dim=2)
