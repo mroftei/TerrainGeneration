@@ -24,6 +24,7 @@ class ChannelGenerator:
         max_iters = 10,
         max_error = 0.1,
         seed = 42,
+        lowEnd_Tolerance_dB = 0,
         dtype = torch.float32,
         device = None,
         debug = False,
@@ -126,15 +127,16 @@ class ChannelGenerator:
     def _get_initial_guess(self, target_pow_linear, power_est_db, rx_xyz, rx_xyz_sprayed):
         #Convert the FilterPower in DB to Linear Power i.e., Linear Space
         power_est_linear = 10**((power_est_db)/10) 
-        
+        tolerance_linear = 10**((self.config['lowEnd_Tolerance_dB'])/10)
         
         #The new check flag tells us whether we want to replicate the Power across the RxTower or distribute it
         if self.config['target_total_p']:
             assert len(target_pow_linear) == 1, "target_total_p=True only accepts a single target value"
-            assert target_pow_linear > torch.sum(power_est_linear.min(0)[0]), "The TargetPower is not in the feasible SNR region of the Rx Towers"
+            assert target_pow_linear > (tolerance_linear * torch.sum(power_est_linear.min(0)[0])), "The TargetPower is not in the feasible SNR region of the Rx Towers"
             target_pow_linear_perchan = self._simple_power_solver(power_est_linear, target_pow_linear, rx_xyz, rx_xyz_sprayed)
         else: 
             assert len(target_pow_linear) == self.config['n_rx'] , "Target SNR wrong shape"
+            assert (target_pow_linear[None,:,None] > (tolerance_linear * power_est_linear.min(0)[0])).all(), "The TargetPower is not in the feasible SNR region of the Rx Towers"
             target_pow_linear_perchan = target_pow_linear[None,:,None]
             
         rms_errors = torch.sqrt((target_pow_linear_perchan - power_est_linear)**2)
