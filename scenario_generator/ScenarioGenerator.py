@@ -72,7 +72,7 @@ class ScenarioGenerator:
             target_total_p = target_total_p,
             minDist = min_receiver_dist,
             batch_size = batch_size,
-            max_iters = max_iter,
+            max_iters = 3,
             max_error = optimizer_error,
             seed = seed,
             dtype = dtype,

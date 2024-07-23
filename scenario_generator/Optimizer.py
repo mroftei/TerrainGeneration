@@ -24,7 +24,7 @@ class ChannelGenerator:
         max_iters = 10,
         max_error = 0.1,
         seed = 42,
-        lowEnd_Tolerance_dB = 0,
+        lowEnd_Tolerance_dB = -2,
         dtype = torch.float32,
         device = None,
         debug = False,
