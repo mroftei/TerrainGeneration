@@ -209,7 +209,7 @@ class ChannelGenerator:
         t = (torch.outer(x1_x3,y3_y4) - torch.outer(y1_y3,x3_x4))/Det
         u = ((y1_y2 * x1_x3) - (x1_x2 * y1_y3))[:,None]/Det
 
-        completeIndex = (((t > 0) & (t < 1)) & ((u > 0) & (u < 1)))
+        completeIndex = (((t >= 0) & (t <= 1)) & ((u >= 0) & (u <= 1)))
         
         x = mapBoundaryA[...,0].T + t * (-1.0 * x1_x2)[:,None]
         y = mapBoundaryA[...,1].T + t * (-1.0 * y1_y2)[:,None]
