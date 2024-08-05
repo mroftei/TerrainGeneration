@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 from sionna_torch import SionnaScenario
 import math
 
-from ortools.linear_solver import pywraplp
-
 
 class ChannelGenerator:
     def __init__(
@@ -221,37 +219,6 @@ class ChannelGenerator:
         _, passing_idx = torch.max(completeIndex, 0)
 
         return torch.cat((newPoints[passing_idx, torch.arange(outPostLoc.shape[1])], z.T), dim=1)[None,:]
-    
-    def _glop_solver(self, target_power_range, power_est_linear):
-        newPowerTensor = torch.zeros(power_est_linear.shape[1], device=self.device)
-        LPSolver = pywraplp.Solver.CreateSolver("GLOP")
-
-        #Enable it to solve problems in two directions i.e., the dual of the problem
-        # LPSolver.SetSolverSpecificParametersAsString("use_dual_simplex:true")
-        
-        #Add constraint that the sum of variables must be equal to the target SNR, hence the lower and upper bound is target value
-        constraint = LPSolver.Constraint((target_power_range[0].item()), (target_power_range[1].item()))
-
-        #Here we do not specify an objective function, however every solver does need something, hence we pass a dummy objective here
-        objective = LPSolver.Objective()
-        objective.SetMinimization()
-
-        variables = []
-        for i in range(power_est_linear.shape[1]):
-            var = LPSolver.NumVar(-1 * (LPSolver.infinity()), LPSolver.infinity(), f'x{i+1}')
-            LPSolver.Add(var >= float(power_est_linear[-1,i,0].item()))
-            LPSolver.Add(var <= float(power_est_linear[0,i,0].item()))
-            variables.append(var)
-            constraint.SetCoefficient(var, 1)
-            objective.SetCoefficient(var, 0)
-
-        # Solve the problem
-        status = LPSolver.Solve()
-
-        assert status == LPSolver.OPTIMAL, "No Optimal solution possible"
-        for i, var in enumerate(variables):
-            newPowerTensor[i] = var.solution_value()
-        return newPowerTensor
 
     def _simple_power_solver(self, powerLinear, targetPower, rxLoc, sprayedRx):
         # first get initial state power and delta
