@@ -126,22 +126,23 @@ class ScenarioGenerator:
 
     def PlotMap(self, SNRs=None, save_path=None):
         fig, axes = plt.subplots(nrows=1, figsize=(4, 4))
-        extent = (0, self.map_size*self.map_resolution, 0, self.map_size*self.map_resolution)
+        divFactorKM = 1000.0
+        extent = (0, (self.map_size*self.map_resolution) / divFactorKM, 0, (self.map_size*self.map_resolution) / divFactorKM)
         im = axes.imshow(self.map.numpy(force=True), extent=extent, origin="lower", cmap="Blues")
         values = torch.unique(self.map.ravel()).numpy(force=True)
 
         for j in range(1):
             for i in range(self.n_rx):
-                x = self.receivers[j, i,0].numpy(force=True) * self.map_resolution
-                y = self.receivers[j, i,1].numpy(force=True) * self.map_resolution
+                x = (self.receivers[j, i,0].numpy(force=True) * self.map_resolution) / divFactorKM
+                y = (self.receivers[j, i,1].numpy(force=True) * self.map_resolution) / divFactorKM
                 axes.scatter(x, y, marker="o", color="g", s=50, zorder=10)
 
             for i in range(self.n_tx):
-                x = self.transmitters[j, i, 0].numpy(force=True) * self.map_resolution
-                y = self.transmitters[j, i, 1].numpy(force=True) * self.map_resolution
+                x = (self.transmitters[j, i, 0].numpy(force=True) * self.map_resolution) / divFactorKM
+                y = (self.transmitters[j, i, 1].numpy(force=True) * self.map_resolution) / divFactorKM
                 axes.scatter(x, y, marker="o", color="y", s=50, zorder=10)
 
-            prop_paths = np.array(list(itertools.product(self.receivers[j,:,:2].numpy(force=True)*self.map_resolution, self.transmitters[j,:,:2].numpy(force=True)*self.map_resolution)))
+            prop_paths = np.array(list(itertools.product((self.receivers[j,:,:2].numpy(force=True)*self.map_resolution) / divFactorKM, (self.transmitters[j,:,:2].numpy(force=True)*self.map_resolution) / divFactorKM)))
             xtrans_coords, ytrans_coords = prop_paths[..., 0].T, prop_paths[..., 1].T
             axes.plot(xtrans_coords, ytrans_coords, "r.-", zorder=0)
 
@@ -185,8 +186,8 @@ class ScenarioGenerator:
         # put those patched as legend-handles into the legend
         plt.legend(handles=patches, bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.0)
         plt.legend(handles=patches, loc='upper right', borderaxespad=0.0)
-        plt.xlabel("Meters")
-        plt.ylabel("Meters")
+        plt.xlabel("Distance [km]")
+        plt.ylabel("Distance [km]")
         plt.tight_layout()
         plt.grid(True)
 
