@@ -117,7 +117,7 @@ class ChannelGenerator:
         
         #Plot the data if the flag is set
         if self.config['debug']:
-            clipped_dist = torch.cdist(tx_xyz_replicated[:,:,0:2], sprayed_tensor[:,:,0:2], p=2)
+            clipped_dist = torch.cdist(tx_xyz_replicated[:,:,0:2], sprayed_tensor[:,:,0:2], p=2) * self.config['map_resolution']
             self.plotSNRvsDist(filtered_snr_db, clipped_dist,rx_snr_db,clipped_dist)
         
         return filtered_power_db, sprayed_tensor
@@ -243,16 +243,17 @@ class ChannelGenerator:
             return currentRxPow    
 
     def plotSNRvsDist(self, filteredSNR, dist1, unfilteredSNR, dist2):
+        divFactor = 1000.0
         for i in range(dist1.shape[2]):
             fig = plt.figure(figsize=(8,8))
             fSNRindividual = filteredSNR[:,i,:].squeeze().tolist()
             unfSNRindividual = unfilteredSNR[:,i,:].squeeze().tolist()
-            d_clipped = dist1[:,:,i].tolist()
-            d_unclipped = dist2[:,:,i].tolist()
+            d_clipped = (dist1[:,:,i] / divFactor).tolist()
+            d_unclipped = (dist2[:,:,i]  / divFactor).tolist()
             
             plt.plot(d_unclipped,unfSNRindividual, label='Unfiltered SNR')
             plt.plot(d_clipped,fSNRindividual, label='Filtered SNR')
             plt.legend()
-            plt.xlabel("Distance (meters)", fontsize = 12)
+            plt.xlabel("Distance to Closest Receiver [km]", fontsize = 12)
             plt.ylabel("SNR [dB]", fontsize = 12)
             plt.savefig(f"DistVsSNRplt1_{i}.jpg")
